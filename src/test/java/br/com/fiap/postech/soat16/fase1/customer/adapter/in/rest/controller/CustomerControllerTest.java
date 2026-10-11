@@ -1,6 +1,7 @@
 package br.com.fiap.postech.soat16.fase1.customer.adapter.in.rest.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -59,6 +60,7 @@ class CustomerControllerTest {
                 "5511987654321",
                 "52998224725",
                 "CPF",
+                true,
                 null);
     }
 
@@ -215,6 +217,7 @@ class CustomerControllerTest {
                     "5511987654321",
                     "52998224725",
                     "CPF",
+                    true,
                     OffsetDateTime.now());
             when(service.update(CustomerRestMapper.toUpdateCommand(CUSTOMER_ID, request)))
                     .thenReturn(Uni.createFrom().item(updated));
@@ -236,6 +239,46 @@ class CustomerControllerTest {
             assertThrows(
                     CustomerNotFoundException.class,
                     () -> controller.update(CUSTOMER_ID, request).await().indefinitely());
+        }
+    }
+
+    @Nested
+    @DisplayName("PATCH /v1/customer/{id}/activate e /deactivate — status")
+    class Status {
+
+        @Test
+        @DisplayName("deve devolver o cliente desativado")
+        void shouldReturnDeactivatedCustomer() {
+            CustomerResult deactivated = new CustomerResult(CUSTOMER_ID, "John", "Doe", null, "5511987654321",
+                    "52998224725", "CPF", false, null);
+            when(service.deactivate(CUSTOMER_ID)).thenReturn(Uni.createFrom().item(deactivated));
+
+            CustomerResponseDto result = controller.deactivate(CUSTOMER_ID).await().indefinitely();
+
+            assertFalse(result.active());
+            verify(service).deactivate(CUSTOMER_ID);
+        }
+
+        @Test
+        @DisplayName("deve devolver o cliente reativado")
+        void shouldReturnActivatedCustomer() {
+            when(service.activate(CUSTOMER_ID)).thenReturn(Uni.createFrom().item(customer));
+
+            CustomerResponseDto result = controller.activate(CUSTOMER_ID).await().indefinitely();
+
+            assertTrue(result.active());
+            verify(service).activate(CUSTOMER_ID);
+        }
+
+        @Test
+        @DisplayName("deve propagar CustomerNotFoundException")
+        void shouldPropagateNotFoundException() {
+            when(service.deactivate(CUSTOMER_ID))
+                    .thenReturn(Uni.createFrom().failure(new CustomerNotFoundException()));
+
+            assertThrows(
+                    CustomerNotFoundException.class,
+                    () -> controller.deactivate(CUSTOMER_ID).await().indefinitely());
         }
     }
 

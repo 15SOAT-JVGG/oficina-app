@@ -1,7 +1,9 @@
 package br.com.fiap.postech.soat16.fase1.customer.domain.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.UUID;
 
@@ -26,6 +28,20 @@ class CustomerTest {
         assertEquals("5511987654321", customer.getPhoneNumber());
         assertEquals("52998224725", customer.getDocument());
         assertEquals(DocumentType.CPF, customer.getDocumentType());
+        assertTrue(customer.isActive());
+    }
+
+    @Test
+    @DisplayName("deve desativar o cliente e reativá-lo depois")
+    void shouldDeactivateAndActivateCustomer() {
+        Customer customer = Customer.create(
+                "John", "Doe", "john@example.com", "5511987654321", Document.of("529.982.247-25"));
+
+        customer.deactivate();
+        assertFalse(customer.isActive());
+
+        customer.activate();
+        assertTrue(customer.isActive());
     }
 
     @Test
@@ -68,6 +84,7 @@ class CustomerTest {
                 "customer@example.com",
                 "11999999999",
                 "52998224725",
-                DocumentType.CPF);
+                DocumentType.CPF,
+                true);
     }
 }

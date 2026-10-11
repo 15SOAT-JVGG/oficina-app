@@ -23,6 +23,7 @@ public final class CustomerPersistenceMapper {
         customer.setPhoneNumber(entity.getPhoneNumber());
         customer.setDocument(entity.getDocument());
         customer.setDocumentType(entity.getDocumentType());
+        customer.setActive(entity.isActive());
         AuditPersistenceMapper.copyToDomain(entity, customer);
         return customer;
     }
@@ -58,5 +59,6 @@ public final class CustomerPersistenceMapper {
         target.setPhoneNumber(source.getPhoneNumber());
         target.setDocument(source.getDocument());
         target.setDocumentType(source.getDocumentType());
+        target.setActive(source.isActive());
     }
 }

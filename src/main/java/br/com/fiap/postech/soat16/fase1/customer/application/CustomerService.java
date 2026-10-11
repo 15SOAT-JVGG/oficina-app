@@ -90,6 +90,28 @@ public class CustomerService {
     }
 
     @WithTransaction
+    public Uni<CustomerResult> activate(UUID id) {
+        return repository.findByCustomerId(id)
+                .onItem().ifNull().failWith(CustomerNotFoundException::new)
+                .flatMap(customer -> {
+                    customer.activate();
+                    return repository.save(customer);
+                })
+                .map(CustomerResult::from);
+    }
+
+    @WithTransaction
+    public Uni<CustomerResult> deactivate(UUID id) {
+        return repository.findByCustomerId(id)
+                .onItem().ifNull().failWith(CustomerNotFoundException::new)
+                .flatMap(customer -> {
+                    customer.deactivate();
+                    return repository.save(customer);
+                })
+                .map(CustomerResult::from);
+    }
+
+    @WithTransaction
     public Uni<Void> delete(UUID id) {
         return vehicleLookup.existsByCustomerId(id)
                 .flatMap(hasVehicles -> {

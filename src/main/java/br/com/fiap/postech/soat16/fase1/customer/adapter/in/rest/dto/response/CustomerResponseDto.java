@@ -16,5 +16,6 @@ public record CustomerResponseDto(
         String phoneNumber,
         String document,
         String documentType,
+        boolean active,
         OffsetDateTime createdAt
 ) { }

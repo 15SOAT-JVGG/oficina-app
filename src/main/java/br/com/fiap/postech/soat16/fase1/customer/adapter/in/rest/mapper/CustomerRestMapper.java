@@ -54,6 +54,7 @@ public final class CustomerRestMapper {
                 result.phoneNumber(),
                 result.document(),
                 result.documentType(),
+                result.active(),
                 result.createdAt());
     }
 }

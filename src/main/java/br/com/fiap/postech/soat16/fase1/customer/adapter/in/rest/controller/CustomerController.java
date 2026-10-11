@@ -9,6 +9,7 @@ import jakarta.ws.rs.BeanParam;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
@@ -79,6 +80,22 @@ public class CustomerController implements CustomerControllerDocs {
         return service.update(CustomerRestMapper.toUpdateCommand(id, dto))
                 .map(CustomerRestMapper::toResponse)
                 .map(updated -> Response.ok(updated).build());
+    }
+
+    @PATCH
+    @Path("/{id}/activate")
+    @RolesAllowed("ADMIN")
+    @Override
+    public Uni<CustomerResponseDto> activate(@PathParam("id") UUID id) {
+        return service.activate(id).map(CustomerRestMapper::toResponse);
+    }
+
+    @PATCH
+    @Path("/{id}/deactivate")
+    @RolesAllowed("ADMIN")
+    @Override
+    public Uni<CustomerResponseDto> deactivate(@PathParam("id") UUID id) {
+        return service.deactivate(id).map(CustomerRestMapper::toResponse);
     }
 
     @DELETE

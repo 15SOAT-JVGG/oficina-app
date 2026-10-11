@@ -61,6 +61,7 @@ class CustomerRestMapperTest {
                 "11999999999",
                 "52998224725",
                 "CPF",
+                true,
                 createdAt);
 
         var response = CustomerRestMapper.toResponse(result);
@@ -86,6 +87,7 @@ class CustomerRestMapperTest {
                 "11999999999",
                 "52998224725",
                 "CPF",
+                true,
                 null);
 
         var page = CustomerRestMapper.toResponse(PagedResult.of(List.of(result), 1, 2, 5));

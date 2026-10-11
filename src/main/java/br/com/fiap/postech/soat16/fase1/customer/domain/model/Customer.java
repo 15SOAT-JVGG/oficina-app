@@ -31,6 +31,12 @@ public class Customer extends AuditableEntity {
 
     private DocumentType documentType;
 
+    /**
+     * Só o cliente ativo se autentica pelo CPF; a ficha e o histórico de um inativo continuam
+     * disponíveis à oficina.
+     */
+    private boolean active = true;
+
     public static Customer create(String firstName, String lastName, String email,
             String phoneNumber, Document document) {
         var customer = new Customer();
@@ -40,6 +46,7 @@ public class Customer extends AuditableEntity {
         customer.phoneNumber = phoneNumber;
         customer.document = document.getValue();
         customer.documentType = document.getType();
+        customer.active = true;
         return customer;
     }
 
@@ -48,6 +55,14 @@ public class Customer extends AuditableEntity {
         this.lastName = lastName;
         this.email = email;
         this.phoneNumber = phoneNumber;
+    }
+
+    public void activate() {
+        this.active = true;
+    }
+
+    public void deactivate() {
+        this.active = false;
     }
 
     /**

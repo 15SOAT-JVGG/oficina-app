@@ -46,4 +46,7 @@ public class CustomerJpaEntity extends AuditableJpaEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "document_type", nullable = false)
     private DocumentType documentType;
+
+    @Column(name = "active", nullable = false)
+    private boolean active = true;
 }
