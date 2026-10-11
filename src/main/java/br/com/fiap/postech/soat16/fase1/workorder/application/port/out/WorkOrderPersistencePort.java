@@ -14,6 +14,10 @@ public interface WorkOrderPersistencePort {
 
     Uni<Long> countOperationalQueue();
 
+    Uni<List<WorkOrder>> findPageByCustomerId(UUID customerId, int page, int size);
+
+    Uni<Long> countByCustomerId(UUID customerId);
+
     Uni<List<WorkOrder>> findClosed();
 
     Uni<WorkOrder> findByWorkOrderId(UUID id);

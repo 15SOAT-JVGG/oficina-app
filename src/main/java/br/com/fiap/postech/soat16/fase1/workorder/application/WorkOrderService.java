@@ -323,13 +323,7 @@ public class WorkOrderService {
     public Uni<EstimateResult> approveEstimate(UUID workOrderId, UUID estimateId) {
         return repository.findByWorkOrderId(workOrderId)
                 .onItem().ifNull().failWith(WorkOrderNotFoundException::new)
-                .flatMap(order -> {
-                    order.ensureMutable();
-                    return estimateRepository.findByEstimateIdAndWorkOrderId(estimateId, workOrderId)
-                            .onItem().ifNull().failWith(EstimateNotFoundException::new)
-                            .flatMap(estimate -> approve(order, estimate,
-                                    LocalDateTime.now(ZoneId.systemDefault())));
-                })
+                .flatMap(order -> decide(order, workOrderId, estimateId, EstimateDecision.APPROVE))
                 .map(estimateMapper::toResult);
     }
 
@@ -337,14 +331,64 @@ public class WorkOrderService {
     public Uni<EstimateResult> rejectEstimate(UUID workOrderId, UUID estimateId) {
         return repository.findByWorkOrderId(workOrderId)
                 .onItem().ifNull().failWith(WorkOrderNotFoundException::new)
-                .flatMap(order -> {
-                    order.ensureMutable();
-                    return estimateRepository.findByEstimateIdAndWorkOrderId(estimateId, workOrderId)
-                            .onItem().ifNull().failWith(EstimateNotFoundException::new)
-                            .flatMap(estimate -> reject(order, estimate,
-                                    LocalDateTime.now(ZoneId.systemDefault())));
-                })
+                .flatMap(order -> decide(order, workOrderId, estimateId, EstimateDecision.REJECT))
                 .map(estimateMapper::toResult);
+    }
+
+    /**
+     * As ordens do cliente autenticado pelo CPF, da mais recente para a mais antiga, incluindo as já
+     * concluídas e entregues.
+     */
+    @WithSession
+    public Uni<PagedResult<WorkOrderResult>> findCustomerWorkOrders(UUID customerId, int page, int size) {
+        return Uni.combine().all()
+                .unis(repository.findPageByCustomerId(customerId, page, size),
+                        repository.countByCustomerId(customerId)).asTuple()
+                .map(tuple -> PagedResult.of(
+                        tuple.getItem1().stream().map(mapper::toResult).toList(),
+                        page,
+                        size,
+                        tuple.getItem2()));
+    }
+
+    @WithSession
+    public Uni<WorkOrderResult> findCustomerWorkOrder(UUID customerId, UUID workOrderId) {
+        return findOwnedWorkOrder(customerId, workOrderId).map(mapper::toResult);
+    }
+
+    @WithTransaction
+    public Uni<EstimateResult> approveCustomerEstimate(UUID customerId, UUID workOrderId, UUID estimateId) {
+        return findOwnedWorkOrder(customerId, workOrderId)
+                .flatMap(order -> decide(order, workOrderId, estimateId, EstimateDecision.APPROVE))
+                .map(estimateMapper::toResult);
+    }
+
+    @WithTransaction
+    public Uni<EstimateResult> rejectCustomerEstimate(UUID customerId, UUID workOrderId, UUID estimateId) {
+        return findOwnedWorkOrder(customerId, workOrderId)
+                .flatMap(order -> decide(order, workOrderId, estimateId, EstimateDecision.REJECT))
+                .map(estimateMapper::toResult);
+    }
+
+    /**
+     * A ordem de outro cliente responde como inexistente: um 403 confirmaria a quem tenta adivinhar
+     * identificadores que aquela ordem existe.
+     */
+    private Uni<WorkOrder> findOwnedWorkOrder(UUID customerId, UUID workOrderId) {
+        return repository.findByWorkOrderId(workOrderId)
+                .map(order -> order != null && order.isOwnedBy(customerId) ? order : null)
+                .onItem().ifNull().failWith(WorkOrderNotFoundException::new);
+    }
+
+    private Uni<Estimate> decide(WorkOrder order, UUID workOrderId, UUID estimateId,
+            EstimateDecision decision) {
+        order.ensureMutable();
+        LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
+        return estimateRepository.findByEstimateIdAndWorkOrderId(estimateId, workOrderId)
+                .onItem().ifNull().failWith(EstimateNotFoundException::new)
+                .flatMap(estimate -> decision == EstimateDecision.APPROVE
+                        ? approve(order, estimate, now)
+                        : reject(order, estimate, now));
     }
 
     @WithTransaction

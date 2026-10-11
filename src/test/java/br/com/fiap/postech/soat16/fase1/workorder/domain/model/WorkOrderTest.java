@@ -1,6 +1,7 @@
 package br.com.fiap.postech.soat16.fase1.workorder.domain.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -69,6 +70,42 @@ class WorkOrderTest {
 
             assertNotEquals(null, a);
             assertNotEquals("not-a-work-order", a);
+        }
+    }
+
+    @Nested
+    @DisplayName("propriedade")
+    class Ownership {
+
+        @Test
+        @DisplayName("pertence ao cliente que a abriu")
+        void ownedByItsCustomer() {
+            UUID customerId = UUID.randomUUID();
+            WorkOrder order = workOrder(UUID.randomUUID(), WorkOrderStatus.RECEIVED);
+            order.getCustomer().setId(customerId);
+
+            assertTrue(order.isOwnedBy(customerId));
+        }
+
+        @Test
+        @DisplayName("não pertence a outro cliente")
+        void notOwnedByAnotherCustomer() {
+            WorkOrder order = workOrder(UUID.randomUUID(), WorkOrderStatus.RECEIVED);
+            order.getCustomer().setId(UUID.randomUUID());
+
+            assertFalse(order.isOwnedBy(UUID.randomUUID()));
+        }
+
+        @Test
+        @DisplayName("não pertence a ninguém sem identificador de cliente dos dois lados")
+        void notOwnedWithoutIdentifiers() {
+            WorkOrder withoutCustomer = workOrder(UUID.randomUUID(), WorkOrderStatus.RECEIVED);
+            withoutCustomer.setCustomer(null);
+            WorkOrder unsavedCustomer = workOrder(UUID.randomUUID(), WorkOrderStatus.RECEIVED);
+
+            assertFalse(withoutCustomer.isOwnedBy(UUID.randomUUID()));
+            assertFalse(unsavedCustomer.isOwnedBy(null));
+            assertFalse(unsavedCustomer.isOwnedBy(UUID.randomUUID()));
         }
     }
 

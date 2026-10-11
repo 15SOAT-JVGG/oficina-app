@@ -827,6 +827,127 @@ class WorkOrderServiceTest {
     }
 
     @Nested
+    @DisplayName("canal do cliente autenticado pelo CPF")
+    class CustomerChannel {
+
+        private static final UUID OTHER_CUSTOMER_ID = UUID.randomUUID();
+
+        private final UUID estimateId = UUID.randomUUID();
+
+        @BeforeEach
+        void ownWorkOrder() {
+            Customer owner = new Customer();
+            owner.setId(CUSTOMER_ID);
+            entity.setCustomer(owner);
+        }
+
+        private Estimate pendingEstimate() {
+            Estimate estimate = new Estimate();
+            estimate.setId(estimateId);
+            estimate.setWorkOrder(entity);
+            estimate.setStatus(EstimateStatus.PENDING);
+            estimate.setTotalAmount(BigDecimal.valueOf(100));
+            return estimate;
+        }
+
+        private void stubDecisionOn(Estimate estimate, EstimateStatus decidedStatus) {
+            when(repository.findByWorkOrderId(WORK_ORDER_ID)).thenReturn(Uni.createFrom().item(entity));
+            when(estimateRepository.findByEstimateIdAndWorkOrderId(estimateId, WORK_ORDER_ID))
+                    .thenReturn(Uni.createFrom().item(estimate));
+            when(repository.saveWithHistory(any(WorkOrder.class), any(WorkOrderHistory.class)))
+                    .thenReturn(Uni.createFrom().item(entity));
+            when(estimateRepository.save(estimate)).thenReturn(Uni.createFrom().item(estimate));
+            when(estimateMapper.toResult(estimate)).thenReturn(new EstimateResult(
+                    estimateId, WORK_ORDER_ID, decidedStatus, BigDecimal.valueOf(100), BigDecimal.ZERO,
+                    BigDecimal.valueOf(100), null, null, List.of()));
+        }
+
+        @Test
+        @DisplayName("deve paginar apenas as ordens do cliente autenticado")
+        void shouldPageCustomerWorkOrders() {
+            when(repository.findPageByCustomerId(CUSTOMER_ID, 0, 10)).thenReturn(Uni.createFrom().item(List.of(entity)));
+            when(repository.countByCustomerId(CUSTOMER_ID)).thenReturn(Uni.createFrom().item(1L));
+            when(mapper.toResult(entity)).thenReturn(response);
+
+            PagedResult<WorkOrderResult> result = service.findCustomerWorkOrders(CUSTOMER_ID, 0, 10)
+                    .await().indefinitely();
+
+            assertEquals(1, result.content().size());
+            assertEquals(1L, result.totalElements());
+        }
+
+        @Test
+        @DisplayName("deve detalhar a ordem que pertence ao cliente autenticado")
+        void shouldReturnOwnWorkOrder() {
+            when(repository.findByWorkOrderId(WORK_ORDER_ID)).thenReturn(Uni.createFrom().item(entity));
+            when(mapper.toResult(entity)).thenReturn(response);
+
+            WorkOrderResult result = service.findCustomerWorkOrder(CUSTOMER_ID, WORK_ORDER_ID).await().indefinitely();
+
+            assertEquals(WORK_ORDER_ID, result.workOrderId());
+        }
+
+        @Test
+        @DisplayName("deve responder como inexistente a ordem de outro cliente")
+        void shouldHideWorkOrderOfAnotherCustomer() {
+            when(repository.findByWorkOrderId(WORK_ORDER_ID)).thenReturn(Uni.createFrom().item(entity));
+
+            assertThrows(WorkOrderNotFoundException.class,
+                    () -> service.findCustomerWorkOrder(OTHER_CUSTOMER_ID, WORK_ORDER_ID).await().indefinitely());
+        }
+
+        @Test
+        @DisplayName("deve lançar WorkOrderNotFoundException quando a ordem não existir")
+        void shouldThrowWhenWorkOrderMissing() {
+            when(repository.findByWorkOrderId(WORK_ORDER_ID)).thenReturn(Uni.createFrom().nullItem());
+
+            assertThrows(WorkOrderNotFoundException.class,
+                    () -> service.findCustomerWorkOrder(CUSTOMER_ID, WORK_ORDER_ID).await().indefinitely());
+        }
+
+        @Test
+        @DisplayName("deve aprovar o orçamento da própria ordem e iniciar a execução")
+        void shouldApproveOwnEstimate() {
+            entity.setStatus(WorkOrderStatus.WAITING_APPROVAL);
+            Estimate estimate = pendingEstimate();
+            stubDecisionOn(estimate, EstimateStatus.APPROVED);
+
+            service.approveCustomerEstimate(CUSTOMER_ID, WORK_ORDER_ID, estimateId).await().indefinitely();
+
+            assertEquals(EstimateStatus.APPROVED, estimate.getStatus());
+            assertEquals(WorkOrderStatus.IN_PROGRESS, entity.getStatus());
+        }
+
+        @Test
+        @DisplayName("deve recusar o orçamento da própria ordem e concluí-la como cancelada")
+        void shouldRejectOwnEstimate() {
+            entity.setStatus(WorkOrderStatus.WAITING_APPROVAL);
+            Estimate estimate = pendingEstimate();
+            stubDecisionOn(estimate, EstimateStatus.REJECTED);
+
+            service.rejectCustomerEstimate(CUSTOMER_ID, WORK_ORDER_ID, estimateId).await().indefinitely();
+
+            assertEquals(EstimateStatus.REJECTED, estimate.getStatus());
+            assertEquals(WorkOrderStatus.COMPLETED, entity.getStatus());
+            assertNotNull(entity.getCancelledAt());
+        }
+
+        @Test
+        @DisplayName("deve impedir que o cliente decida o orçamento de outro cliente")
+        void shouldNotDecideEstimateOfAnotherCustomer() {
+            when(repository.findByWorkOrderId(WORK_ORDER_ID)).thenReturn(Uni.createFrom().item(entity));
+
+            assertThrows(WorkOrderNotFoundException.class,
+                    () -> service.approveCustomerEstimate(OTHER_CUSTOMER_ID, WORK_ORDER_ID, estimateId)
+                            .await().indefinitely());
+            assertThrows(WorkOrderNotFoundException.class,
+                    () -> service.rejectCustomerEstimate(OTHER_CUSTOMER_ID, WORK_ORDER_ID, estimateId)
+                            .await().indefinitely());
+            verify(estimateRepository, never()).findByEstimateIdAndWorkOrderId(any(), any());
+        }
+    }
+
+    @Nested
     @DisplayName("envio do orçamento ao entrar em WAITING_APPROVAL")
     class SendEstimateToCustomer {
 
