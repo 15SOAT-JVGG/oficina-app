@@ -129,35 +129,21 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-  # ── 4. IaC — sintaxe da infraestrutura e dos manifestos, sem tocar em nuvem ──
-  iac_validate:
-    name: IaC Validation (Terraform + Kubernetes)
+  # ── 4. Manifestos do Kubernetes — sintaxe e schema, sem tocar em nuvem ───────
+  #
+  # O Terraform do cluster e do banco vive nos repositórios oficina-infra-k8s e
+  # oficina-infra-db, cada um com a própria validação.
+  manifests_validate:
+    name: Kubernetes Manifests Validation
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      TERRAFORM_VERSION: "1.16.0"
       # Acompanha o `kubernetes_version` do cluster em oficina-infra-k8s/variables.tf; o
       # patch vem porque o schema é publicado por versão exata. É contra ele que os
       # manifestos são validados.
       KUBERNETES_VERSION: "1.34.1"
     steps:
       - uses: actions/checkout@v4
-
-      - name: Instala o Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-          terraform_wrapper: false
-
-      - name: Formatação do HCL
-        run: terraform -chdir=infra/terraform fmt -check -recursive -diff
-
-      # -backend=false é o que mantém a validação fora da nuvem: sem state remoto e
-      # sem credencial da AWS, só os providers e a checagem de tipos do HCL.
-      - name: Sintaxe do HCL
-        run: |
-          terraform -chdir=infra/terraform init -backend=false
-          terraform -chdir=infra/terraform validate
 
       - name: Instala o kubectl
         uses: azure/setup-kubectl@v4
