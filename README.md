@@ -9,7 +9,7 @@ cliente acompanhar e autorizar o serviço.
 A **Fase 2** tira a aplicação do Docker Compose e a coloca num **cluster EKS provisionado por
 Terraform**, com **Postgres gerenciado no RDS**, exposição por **Load Balancer**, configuração em
 `ConfigMap`, credenciais em `Secret`, **escalabilidade automática** por consumo de CPU e memória, e um
-**caminho de entrega automatizado** que a cada merge na `main` constrói, publica, implanta e verifica.
+**caminho de entrega automatizado** que a cada push em `homolog` ou `production` constrói, publica, implanta e verifica.
 
 Este README é sobre **arquitetura, infraestrutura e operação** — é o que a Fase 2 entrega. A
 referência da aplicação em si (funcionalidades, variáveis de configuração, autenticação, mapa de
@@ -186,13 +186,13 @@ flowchart TB
         iac["Validação de IaC<br/>terraform fmt e validate<br/>kubectl kustomize e kubeconform"]
     end
 
-    merge["Merge na main"]
+    merge["Push em homolog ou production"]
 
     subgraph deploy["Workflow Deploy · deploy.yml · automático"]
         direction TB
         dbuild["Build e Tests<br/>./mvnw verify"]
         dimage["Imagem no ECR<br/>publica com a tag do SHA"]
-        dapply["Deploy no cluster<br/>cria os Secret · kubectl apply -k k8s/<br/>rollout status · smoke test"]
+        dapply["Deploy no cluster<br/>cria os Secret · kubectl apply -k k8s/overlays/&lt;ambiente&gt;<br/>rollout status · smoke test"]
     end
 
     operador["Operador"]
@@ -357,88 +357,115 @@ Variáveis, saídas, o que fazer quando o lab é reiniciado e como acessar o ban
 
 ## Implantando no cluster
 
-Os manifestos vivem em [`k8s/`](k8s/), fora de `infra/`, porque é onde o enunciado da fase os exige.
+O cluster EKS e o banco **não** são provisionados por este repositório: o cluster vem do
+`oficina-infra-k8s` e o RDS do `oficina-infra-db`, cada um com sua pipeline. Aqui ficam os manifestos
+da aplicação e a entrega.
 
-| Objeto                                       | Arquivo               | O que carrega                                                                                                           |
-| -------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `ConfigMap` `oficina-mecanica-config`        | `k8s/configmap.yaml`  | Host e nome do banco, modo TLS, porta, issuer e expiração do JWT, caminho das chaves, usuários de seed, flag do Swagger |
-| `Secret` `oficina-mecanica-env`              | criado por script     | Usuário e senha do banco, senhas de seed                                                                                |
-| `Secret` `oficina-mecanica-jwt`              | criado por script     | O par RS256, montado como arquivo em `/etc/jwt`                                                                         |
-| `Deployment` `oficina-mecanica`              | `k8s/deployment.yaml` | Probes, requests e limits, container non-root; o número de réplicas é do HPA                                            |
-| `Service` `oficina-mecanica`                 | `k8s/service.yaml`    | `LoadBalancer`, que o EKS materializa como ELB clássico                                                                 |
-| `HorizontalPodAutoscaler` `oficina-mecanica` | `k8s/hpa.yaml`        | De 1 a 6 réplicas, por CPU e memória                                                                                    |
+Os ambientes dividem um cluster e se isolam por **namespace** e por um **RDS próprio** cada:
+
+| Branch       | Namespace    | Banco                       | Deploy                       |
+| ------------ | ------------ | --------------------------- | ---------------------------- |
+| `main`       | —            | —                           | só CI (testes, lint, scans)  |
+| `homolog`    | `homolog`    | `oficina-homolog` (RDS)     | automático a cada push       |
+| `production` | `production` | `oficina-production` (RDS)  | automático a cada push       |
+
+Os manifestos vivem em [`k8s/`](k8s/), fora de `infra/`, porque é onde o enunciado da fase os exige.
+A `base/` tem o que os dois ambientes dividem, e cada `overlays/<ambiente>/` escolhe o namespace e o que
+varia (o host do banco):
+
+| Objeto                                       | Arquivo                    | O que carrega                                                                                                |
+| -------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `ConfigMap` `oficina-mecanica-config`        | `k8s/base/configmap.yaml`  | Nome do banco, modo TLS, porta, issuer e expiração do JWT, caminho das chaves, usuários de seed, Swagger     |
+| `ConfigMap` (patch)                          | `k8s/overlays/*/configmap-patch.yaml` | Host do RDS do ambiente                                                                           |
+| `Secret` `oficina-mecanica-env`              | criado por script          | Usuário e senha do banco, senhas de seed                                                                     |
+| `Secret` `oficina-mecanica-jwt`              | criado por script          | O par RS256, montado como arquivo em `/etc/jwt`                                                              |
+| `Deployment` `oficina-mecanica`              | `k8s/base/deployment.yaml` | Probes, requests e limits, container non-root; o número de réplicas é do HPA                                 |
+| `Service` `oficina-mecanica`                 | `k8s/base/service.yaml`    | `LoadBalancer`, que o EKS materializa como ELB clássico                                                      |
+| `HorizontalPodAutoscaler` `oficina-mecanica` | `k8s/base/hpa.yaml`        | De 1 a 6 réplicas, por CPU e memória                                                                         |
 
 Os dois `Secret` **não** estão em `k8s/` de propósito: senha do banco, credenciais de seed e chave
 privada não entram no repositório.
 
-Numa conta nova, dois valores dos manifestos dependem do apply e precisam bater com o que o Terraform
-produziu:
+O endereço da imagem não é versionado: ele carrega o ID da conta do Learner Lab, que muda entre
+sessões. O `Deployment` traz um marcador (`oficina-mecanica`) e o deploy o troca pelo repositório `oficina-app`
+do ECR e pelo SHA do commit.
 
-| Onde                     | Chave                 | De onde vem                                                       |
-| ------------------------ | --------------------- | ----------------------------------------------------------------- |
-| `k8s/configmap.yaml`     | `INFRA_HOST_POSTGRES` | `terraform -chdir=infra/terraform output -raw database_host`      |
-| `k8s/kustomization.yaml` | `images[0].newName`   | `terraform -chdir=infra/terraform output -raw ecr_repository_url` |
+### Habilitando um ambiente (uma vez)
 
-### Da máquina do operador
+Com o kubeconfig de administrador do cluster (`aws eks update-kubeconfig --name oficina --region us-east-1`):
 
 ```bash
-# Uma vez: gera o par RS256 fora do build da imagem.
-infra/scripts/generate-jwt-pair.sh
-
-export APP_SEED_ADMIN_PASSWORD=... APP_SEED_MECHANIC_PASSWORD=...
-infra/scripts/create-app-credentials.sh
-
-infra/scripts/publish-image.sh
-kubectl apply -k k8s/
-# A tag versionada é `latest`, então o apply sozinho não muda o pod: é o restart
-# que faz o Kubernetes buscar a imagem recém-publicada.
-kubectl rollout restart deploy/oficina-mecanica
-kubectl rollout status deploy/oficina-mecanica
-
-# Prova de que funcionou, de fora para dentro.
-infra/scripts/smoke-test.sh
+# Cria o namespace, a ServiceAccount do deploy (com permissão só nele) e grava o kubeconfig dela.
+infra/scripts/create-deploy-kubeconfig.sh homolog
 ```
 
-O endereço público sai do `Service`; o ELB leva cerca de um minuto para começar a responder:
+Depois, no GitHub, cria-se o **Environment** `homolog` (ou `production`) deste repositório e cadastram-se
+nele os secrets abaixo. Cada ambiente tem os seus: é o nome da branch que escolhe qual conjunto o deploy lê.
 
-```bash
-ELB="$(kubectl get svc oficina-mecanica -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
-curl "http://$ELB/q/health/ready"
-```
+| Secret                                                            | De onde vem                                                              |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `KUBE_CONFIG_B64`                                                 | `infra/scripts/create-deploy-kubeconfig.sh <ambiente>`                   |
+| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD`                         | `db_username` e o secret `DB_PASSWORD` do `oficina-infra-db`             |
+| `APP_SEED_ADMIN_PASSWORD` / `APP_SEED_MECHANIC_PASSWORD`          | Escolhidas pelo operador; são as credenciais de acesso à API             |
+| `JWT_PRIVATE_KEY_B64` / `JWT_PUBLIC_KEY_B64`                      | `infra/scripts/generate-jwt-pair.sh`                                     |
+| `MAIL_USERNAME` / `MAIL_PASSWORD`                                 | Opcionais; sem elas o e-mail só sai se o mailer estiver em modo simulado |
 
-### Pelo caminho de entrega
-
-O mesmo deploy acima, sem passo manual: o workflow **Workflow Deploy**
-(`.github/workflows/deploy.yml`) roda a cada merge na `main`. A tag da imagem é o SHA do commit, e é
-ela que faz do `kubectl apply` um rollout de verdade — com `latest`, o objeto no cluster não mudaria e
-nenhum pod seria substituído.
-
-O acesso ao cluster **não usa credencial da AWS**: a sessão do Learner Lab expira em cerca de quatro
-horas e o deploy ficaria vermelho por motivo alheio ao código. Ele autentica com o token de uma
-`ServiceAccount` dedicada, criada uma vez por cluster por
-`infra/scripts/create-deploy-kubeconfig.sh`
-([ADR-0002](docs/adr/0002-deploy-no-cluster-via-kubeconfig-de-serviceaccount.md)).
-
-Habilitar a pipeline num cluster novo é gravar os secrets do repositório:
-
-| Secret                                                            | De onde vem                                                     |
-| ----------------------------------------------------------------- | --------------------------------------------------------------- |
-| `KUBE_CONFIG_B64`                                                 | `infra/scripts/create-deploy-kubeconfig.sh`                     |
-| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD`                         | `terraform output -raw database_username` / `database_password` |
-| `APP_SEED_ADMIN_PASSWORD` / `APP_SEED_MECHANIC_PASSWORD`          | Escolhidas pelo operador; são as credenciais de acesso à API    |
-| `JWT_PRIVATE_KEY_B64` / `JWT_PUBLIC_KEY_B64`                      | `infra/scripts/generate-jwt-pair.sh`                            |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Painel _AWS Details_ do lab; só o job da imagem os usa          |
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN` são secrets da organização e só o job
+da imagem os usa. Eles vencem com a sessão do lab (cerca de quatro horas).
 
 O par RS256 vai para os secrets em base64:
 
 ```shell
 infra/scripts/generate-jwt-pair.sh /caminho/seguro/jwt
-gh secret set JWT_PRIVATE_KEY_B64 --body "$(base64 < /caminho/seguro/jwt/privateKey.pem | tr -d '\n')"
-gh secret set JWT_PUBLIC_KEY_B64  --body "$(base64 < /caminho/seguro/jwt/publicKey.pem  | tr -d '\n')"
+gh secret set JWT_PRIVATE_KEY_B64 --env homolog --body "$(base64 < /caminho/seguro/jwt/privateKey.pem | tr -d '\n')"
+gh secret set JWT_PUBLIC_KEY_B64  --env homolog --body "$(base64 < /caminho/seguro/jwt/publicKey.pem  | tr -d '\n')"
 ```
 
 Por que a chave sai do build da imagem e o que acontece se ela for regerada:
 [docs/FASE-1.md](docs/FASE-1.md#chaves-jwt-rs256).
+
+### Pelo caminho de entrega
+
+O workflow **Workflow Deploy** (`.github/workflows/deploy.yml`) roda a cada push em `homolog` ou
+`production`: testa, constrói a imagem, publica no ECR, entrega os segredos, aplica o overlay do ambiente,
+espera o rollout e roda o smoke test. A promoção é o merge `main` → `homolog` → `production`. A tag da
+imagem é o SHA do commit, e é ela que faz do `kubectl apply` um rollout de verdade — com `latest`, o
+objeto no cluster não mudaria e nenhum pod seria substituído.
+
+O acesso ao cluster **não usa credencial da AWS**: a sessão do Learner Lab expira em cerca de quatro
+horas e o deploy ficaria vermelho por motivo alheio ao código. Ele autentica com o token de uma
+`ServiceAccount` dedicada, uma por namespace, de modo que o token de homologação não alcança produção
+([ADR-0002](docs/adr/0002-deploy-no-cluster-via-kubeconfig-de-serviceaccount.md)).
+
+O overlay de `production` nasce com o host do banco marcado como `PREENCHER`, e o deploy recusa esse
+valor: o RDS de produção só existe depois do apply do `oficina-infra-db` naquela branch.
+
+### Da máquina do operador
+
+Para um deploy manual num ambiente, com o kubeconfig de administrador:
+
+```bash
+export NAMESPACE=homolog
+export POSTGRES_USERNAME=... POSTGRES_PASSWORD=...
+export APP_SEED_ADMIN_PASSWORD=... APP_SEED_MECHANIC_PASSWORD=...
+infra/scripts/generate-jwt-pair.sh          # uma vez
+infra/scripts/create-app-credentials.sh
+
+infra/scripts/publish-image.sh              # imprime o endereço do repositório e a tag (SHA)
+cd k8s/overlays/$NAMESPACE
+kustomize edit set image oficina-mecanica=<repositório>:<sha>
+kubectl apply -k .
+kubectl rollout status deploy/oficina-mecanica -n "$NAMESPACE"
+
+infra/scripts/smoke-test.sh                 # prova de que funcionou, de fora para dentro
+```
+
+O endereço público sai do `Service`; o ELB leva cerca de um minuto para começar a responder:
+
+```bash
+ELB="$(kubectl get svc oficina-mecanica -n homolog -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+curl "http://$ELB/q/health/ready"
+```
 
 ---
 
