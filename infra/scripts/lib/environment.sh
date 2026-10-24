@@ -18,6 +18,11 @@ ADMIN_USERNAME="${APP_SEED_ADMIN_USERNAME:-admin}"
 BALANCER_TIMEOUT_SECONDS="${BALANCER_TIMEOUT_SECONDS:-180}"
 BALANCER_RETRY_SECONDS=5
 
+# NAMESPACE escolhe o ambiente. Sem ele vale o namespace do contexto atual do kubectl.
+kube() {
+    kubectl ${NAMESPACE:+--namespace "$NAMESPACE"} "$@"
+}
+
 require_tools() {
     local tool
     for tool in "$@"; do
@@ -55,7 +60,7 @@ resolve_base_url() {
     require_tools kubectl
     deadline=$((SECONDS + BALANCER_TIMEOUT_SECONDS))
     while :; do
-        elb_hostname="$(kubectl get svc "$SERVICE_NAME" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+        elb_hostname="$(kube get svc "$SERVICE_NAME" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
         if [[ -n "$elb_hostname" ]]; then
             BASE_URL="http://$elb_hostname"
             return
