@@ -130,7 +130,8 @@ expect_equals "código do CPF sem cadastro" "$(extract '.code')" "CUSTOMER_NOT_A
 UNKNOWN_CUSTOMER_REFUSAL="$(refusal_signature)"
 echo "7/8 CPF inválido (400) e CPF sem cadastro (401) recusados"
 
-call PATCH "/v1/customer/$CUSTOMER_ID/deactivate" 200 "" "$ADMIN_TOKEN"
+# O controller consome JSON, então até um PATCH sem dados precisa de Content-Type; sem ele a resposta é 415.
+call PATCH "/v1/customer/$CUSTOMER_ID/deactivate" 200 '{}' "$ADMIN_TOKEN"
 call POST "$CUSTOMER_AUTH_PATH" 401 "$(authenticate_customer "$DOCUMENT")"
 expect_equals "recusa do cliente inativo" "$(refusal_signature)" "$UNKNOWN_CUSTOMER_REFUSAL"
 echo "8/8 cliente desativado recusado com a mesma resposta do CPF sem cadastro"
