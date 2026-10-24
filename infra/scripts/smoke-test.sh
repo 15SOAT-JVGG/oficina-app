@@ -100,27 +100,8 @@ wait_until_ready() {
     done
 }
 
-# Documento e placa novos a cada execução: rodar o smoke test duas vezes seguidas não
-# pode falhar por unicidade. Os dígitos verificadores do CPF são calculados aqui porque
-# a aplicação recusa documento inválido na entrada — é o algoritmo público do CPF, não
-# uma regra desta oficina.
-generate_document() {
-    local digits=() index check_digit sum first_weight remainder
-    for ((index = 0; index < 9; index++)); do
-        digits+=($((RANDOM % 10)))
-    done
-    for ((check_digit = 0; check_digit < 2; check_digit++)); do
-        sum=0
-        first_weight=$((10 + check_digit))
-        for ((index = 0; index < 9 + check_digit; index++)); do
-            sum=$((sum + digits[index] * (first_weight - index)))
-        done
-        remainder=$((sum % 11))
-        digits+=($((remainder < 2 ? 0 : 11 - remainder)))
-    done
-    printf '%s' "${digits[@]}"
-}
-
+# Placa nova a cada execução: rodar o smoke test duas vezes seguidas não pode falhar por
+# unicidade. O documento novo vem de generate_document, em lib/environment.sh.
 random_letter() {
     local alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     printf '%s' "${alphabet:RANDOM % ${#alphabet}:1}"

@@ -82,3 +82,23 @@ login_payload() {
         --arg password "$APP_SEED_ADMIN_PASSWORD" \
         '{username: $username, password: $password}'
 }
+
+# Gera um CPF válido novo a cada chamada: rodar um script duas vezes seguidas não pode falhar por
+# unicidade. Os dígitos verificadores são calculados aqui porque a aplicação recusa documento
+# inválido na entrada — é o algoritmo público do CPF, não uma regra desta oficina.
+generate_document() {
+    local digits=() index check_digit sum first_weight remainder
+    for ((index = 0; index < 9; index++)); do
+        digits+=($((RANDOM % 10)))
+    done
+    for ((check_digit = 0; check_digit < 2; check_digit++)); do
+        sum=0
+        first_weight=$((10 + check_digit))
+        for ((index = 0; index < 9 + check_digit; index++)); do
+            sum=$((sum + digits[index] * (first_weight - index)))
+        done
+        remainder=$((sum % 11))
+        digits+=($((remainder < 2 ? 0 : 11 - remainder)))
+    done
+    printf '%s' "${digits[@]}"
+}
