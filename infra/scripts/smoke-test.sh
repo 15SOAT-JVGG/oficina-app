@@ -17,8 +17,10 @@
 # que a demonstração usa em seguida.
 #
 # Uso:
-#   infra/scripts/smoke-test.sh                       # descobre o endereço do Service no cluster
+#   NAMESPACE=homolog infra/scripts/smoke-test.sh     # descobre o endereço do Service no cluster
 #   infra/scripts/smoke-test.sh http://localhost:8080 # ou um endereço explícito
+#
+# NAMESPACE escolhe o ambiente; sem ele vale o namespace do contexto atual do kubectl.
 #
 # Requer curl e jq, mais kubectl quando o endereço não é informado. E requer
 # APP_SEED_ADMIN_PASSWORD — a mesma senha entregue ao cluster por

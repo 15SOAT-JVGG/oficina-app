@@ -7,29 +7,39 @@
 # (ADR-0002). Ela autentica com o token de uma ServiceAccount dedicada, guardado como um
 # único secret do repositório.
 #
-# O que é criado no namespace default:
+# O que é criado no namespace do ambiente (homolog ou production):
 #
+#   Namespace      o do ambiente, se ainda não existir (a ServiceAccount não tem
+#                  permissão para criá-lo, por isso é este script, com perfil de
+#                  administrador, que o cria)
 #   ServiceAccount github-deployer  a identidade
 #   Secret         github-deployer-token  token de longa duração, preenchido pelo cluster
 #   Role/RoleBinding github-deployer  só o que o deploy faz: aplicar os objetos da
 #                                     aplicação, acompanhar o rollout e ler o endereço
 #                                     do Service
 #
-# Rode uma vez por cluster, com um kubeconfig de administrador (o de
-# `aws eks update-kubeconfig`). É idempotente: reexecutar reaplica os objetos e regrava o
-# arquivo com o mesmo token.
+# Rode uma vez por ambiente, com um kubeconfig de administrador (o de
+# `aws eks update-kubeconfig`). Cada ambiente tem a sua ServiceAccount, e a permissão dela
+# vale só dentro do próprio namespace: o token de homologação não alcança produção. É
+# idempotente: reexecutar reaplica os objetos e regrava o arquivo com o mesmo token.
 #
 # O token não expira sozinho. Se vazar, a mitigação é apagar a ServiceAccount:
-#   kubectl delete serviceaccount github-deployer
+#   kubectl delete serviceaccount github-deployer -n <namespace>
 #
-# Uso: infra/scripts/create-deploy-kubeconfig.sh [arquivo-de-saída]
+# Uso: infra/scripts/create-deploy-kubeconfig.sh <homolog|production> [arquivo-de-saída]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUTPUT_FILE="${1:-$REPO_ROOT/.local-kube/deploy-kubeconfig.yaml}"
+
+NAMESPACE="${1:-}"
+if [[ "$NAMESPACE" != "homolog" && "$NAMESPACE" != "production" ]]; then
+    echo "Informe o ambiente: homolog ou production." >&2
+    echo "Uso: $0 <homolog|production> [arquivo-de-saída]" >&2
+    exit 1
+fi
+OUTPUT_FILE="${2:-$REPO_ROOT/.local-kube/deploy-kubeconfig-$NAMESPACE.yaml}"
 
 SERVICE_ACCOUNT="github-deployer"
-NAMESPACE="default"
 TOKEN_SECRET="$SERVICE_ACCOUNT-token"
 TOKEN_TIMEOUT_SECONDS=30
 TOKEN_RETRY_SECONDS=2
@@ -43,7 +53,7 @@ CLUSTER_CA="$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].clus
 if [[ -z "$CLUSTER_SERVER" || -z "$CLUSTER_CA" ]]; then
     echo "O kubeconfig atual não descreve um cluster com endereço e CA." >&2
     echo "Grave o acesso ao cluster antes de rodar:" >&2
-    echo "  \$(terraform -chdir=infra/terraform output -raw kubeconfig_command)" >&2
+    echo "  aws eks update-kubeconfig --name oficina --region us-east-1" >&2
     exit 1
 fi
 
@@ -51,6 +61,11 @@ fi
 # create token` emite um token com prazo, e um secret do repositório que vence sozinho
 # deixaria a entrega parada até alguém regravá-lo.
 kubectl apply -f - <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: $NAMESPACE
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -115,7 +130,7 @@ while :; do
     [[ -n "$TOKEN" ]] && break
     ((SECONDS < DEADLINE)) || {
         echo "O token não foi preenchido em ${TOKEN_TIMEOUT_SECONDS}s." >&2
-        echo "Investigue o Secret: kubectl describe secret $TOKEN_SECRET" >&2
+        echo "Investigue o Secret: kubectl describe secret $TOKEN_SECRET -n $NAMESPACE" >&2
         exit 1
     }
     sleep "$TOKEN_RETRY_SECONDS"
@@ -151,5 +166,5 @@ echo
 echo "Confira o acesso:"
 echo "  KUBECONFIG=$OUTPUT_FILE kubectl get deploy"
 echo
-echo "Guarde no secret do repositório que o workflow de entrega lê:"
-echo "  gh secret set KUBE_CONFIG_B64 --body \"\$(base64 < $OUTPUT_FILE | tr -d '\\n')\""
+echo "Guarde no secret do GitHub Environment '$NAMESPACE' do repositório oficina-app:"
+echo "  gh secret set KUBE_CONFIG_B64 --env $NAMESPACE --body \"\$(base64 < $OUTPUT_FILE | tr -d '\\n')\""
