@@ -3,10 +3,12 @@ kind: ConfigMap
 metadata:
   name: oficina-mecanica-config
 data:
-  # Endereço do RDS. Sai de `terraform -chdir=infra/terraform output -raw database_host`
-  # e muda se a instância for recriada; infra/scripts/create-app-credentials.sh compara
-  # os dois valores e recusa o deploy quando divergem.
-  INFRA_HOST_POSTGRES: oficina-mecanica-db.ct7ua73ac1o4.us-east-1.rds.amazonaws.com
+  # O endereço do RDS (INFRA_HOST_POSTGRES) e o endereço público da API
+  # (APP_PUBLIC_BASE_URL) variam por ambiente e por isso vivem no patch de cada overlay,
+  # em k8s/overlays/<ambiente>/configmap-patch.yaml.
+  #
+  # O database é o mesmo nos dois ambientes porque cada ambiente tem a sua própria
+  # instância RDS (repositório oficina-infra-db); o que os separa é o host, não o nome.
   POSTGRES_DB: oficina
 
   # O RDS recusa conexão sem criptografia. As duas variáveis andam juntas: `require`
@@ -17,15 +19,6 @@ data:
   POSTGRES_TRUST_ALL: "true"
 
   QUARKUS_HTTP_PORT: "8080"
-
-  # Endereço por onde o cliente alcança a API, e por isso a base dos links de
-  # acompanhamento e de decisão do orçamento que saem por e-mail. Sai de
-  # `kubectl get svc oficina-mecanica -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'`
-  # e só existe depois do primeiro apply, porque é o ELB que o Service provisiona.
-  #
-  # Sem este valor vale o default de desenvolvimento, `http://localhost:8080`: o e-mail
-  # chega, mas o link não abre para quem o recebeu. Apagar o Service troca o endereço.
-  APP_PUBLIC_BASE_URL: http://a288077509cd3421ca7879b6d2a7583c-1322134637.us-east-1.elb.amazonaws.com
 
   JWT_ISSUER: oficina-api
   JWT_EXPIRATION_HOURS: "8"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Constrói a imagem da aplicação e publica no ECR criado pelo Terraform.
+# Constrói a imagem da aplicação e publica no ECR criado pelo oficina-infra-k8s.
 #
 # A tag é o SHA do commit, para que o rollout no cluster seja sempre uma mudança real
 # de imagem; `latest` acompanha por conveniência de inspeção manual.
@@ -7,14 +7,14 @@
 # A plataforma é fixada em linux/amd64: os nós do EKS são t3.medium (x86_64) e uma
 # imagem construída num Mac ARM sem essa flag sobe, mas nenhum pod inicia.
 #
-# Requer uma sessão ativa do lab e o repositório já provisionado
-# (`terraform -chdir=infra/terraform apply`).
+# Requer uma sessão ativa do lab e o repositório `oficina-app` já provisionado (pipeline do
+# oficina-infra-k8s).
 #
 # Uso: infra/scripts/publish-image.sh [tag]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform"
+ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME:-oficina-app}"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 
 for tool in aws docker git; do
@@ -23,10 +23,13 @@ done
 
 TAG="${1:-$(git -C "$REPO_ROOT" rev-parse HEAD)}"
 
-# Em CI o repositório vem por variável de ambiente, sem custo de um init do Terraform.
+# O endereço do repositório carrega o ID da conta, que muda entre sessões do Learner Lab; por
+# isso é perguntado à AWS em vez de versionado. Em CI ele já chega por variável de ambiente.
 if [[ -z "${ECR_REPOSITORY_URL:-}" ]]; then
-    command -v terraform >/dev/null || { echo "terraform não encontrado" >&2; exit 1; }
-    ECR_REPOSITORY_URL="$(terraform -chdir="$TERRAFORM_DIR" output -raw ecr_repository_url)"
+    ECR_REPOSITORY_URL="$(aws ecr describe-repositories \
+        --region "$REGION" \
+        --repository-names "$ECR_REPOSITORY_NAME" \
+        --query 'repositories[0].repositoryUri' --output text)"
 fi
 REGISTRY="${ECR_REPOSITORY_URL%%/*}"
 

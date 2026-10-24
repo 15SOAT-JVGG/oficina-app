@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# A base é o que os dois ambientes têm em comum. Ela não é aplicada sozinha: cada
+# ambiente é um overlay em k8s/overlays/, que escolhe o namespace e o que varia.
+resources:
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: oficina-mecanica
+
+# Os Secrets que o Deployment consome não estão aqui. Eles são criados por
+# infra/scripts/create-app-credentials.sh, a partir dos secrets do GitHub Environment.
+
+# A imagem do Deployment (`oficina-mecanica`) é um marcador: o repositório e a tag só
+# existem na hora da entrega. A conta do Learner Lab muda entre sessões, então o endereço
+# do ECR não é versionado — o deploy descobre o repositório pela AWS e troca o marcador
+# pelo repositório e pelo SHA do commit (`kustomize edit set image`, no overlay, em
+# .github/workflows/deploy.yml).

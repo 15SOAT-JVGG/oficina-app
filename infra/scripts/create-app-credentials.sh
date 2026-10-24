@@ -6,26 +6,28 @@
 #   oficina-mecanica-env  variáveis sensíveis, injetadas por envFrom
 #   oficina-mecanica-jwt  o par RS256, montado como arquivo em /etc/jwt
 #
-# Cada valor tem duas origens, e é o que permite o mesmo script servir ao operador e à
-# pipeline — que não tem credencial da AWS para ler o state do Terraform (ADR-0002):
+# Tudo chega por variável de ambiente, o que serve igualmente ao operador e à pipeline —
+# que não tem credencial da AWS (ADR-0002) e recebe os valores dos secrets do GitHub
+# Environment:
 #
-#   usuário e senha do banco  POSTGRES_USERNAME / POSTGRES_PASSWORD quando definidos,
-#                             senão os outputs do Terraform
+#   usuário e senha do banco  POSTGRES_USERNAME / POSTGRES_PASSWORD, os mesmos do
+#                             oficina-infra-db (`db_username` e o secret DB_PASSWORD)
 #   par RS256                 JWT_PRIVATE_KEY_B64 / JWT_PUBLIC_KEY_B64 quando definidos,
 #                             senão um diretório local gerado por
 #                             infra/scripts/generate-jwt-pair.sh
 #   credenciais de SMTP       MAIL_USERNAME / MAIL_PASSWORD, opcionais: sem elas o
 #                             mailer só entrega se estiver em modo simulado
 #
+# NAMESPACE escolhe o ambiente. Sem ele vale o namespace do contexto atual do kubectl, que
+# no kubeconfig da pipeline já é o do ambiente.
+#
 # Idempotente: reescreve os dois a cada execução. Reiniciar os pods depois é de quem
 # chama (`kubectl rollout restart deploy/oficina-mecanica`).
 #
-# Uso: infra/scripts/create-app-credentials.sh [diretório-do-par-rs256]
+# Uso: NAMESPACE=homolog infra/scripts/create-app-credentials.sh [diretório-do-par-rs256]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform"
-CONFIGMAP_FILE="$REPO_ROOT/k8s/configmap.yaml"
 JWT_DIR="${1:-$REPO_ROOT/.local-jwt}"
 
 ENV_SECRET="oficina-mecanica-env"
@@ -35,50 +37,21 @@ PUBLIC_PEM="publicKey.pem"
 
 command -v kubectl >/dev/null || { echo "kubectl não encontrado" >&2; exit 1; }
 
-for required in APP_SEED_ADMIN_PASSWORD APP_SEED_MECHANIC_PASSWORD; do
+# Todo kubectl daqui passa pelo namespace pedido, quando houver um.
+kube() {
+    kubectl ${NAMESPACE:+--namespace "$NAMESPACE"} "$@"
+}
+
+for required in POSTGRES_USERNAME POSTGRES_PASSWORD APP_SEED_ADMIN_PASSWORD APP_SEED_MECHANIC_PASSWORD; do
     if [[ -z "${!required:-}" ]]; then
         echo "$required não definida." >&2
-        echo "Sem ela a aplicação sobe sem usuário para autenticar. Exporte as duas:" >&2
+        echo "Sem as credenciais do banco o pod não conecta, e sem as de seed a aplicação" >&2
+        echo "sobe sem usuário para autenticar. Exporte as quatro:" >&2
+        echo "  export POSTGRES_USERNAME=... POSTGRES_PASSWORD=..." >&2
         echo "  export APP_SEED_ADMIN_PASSWORD=... APP_SEED_MECHANIC_PASSWORD=..." >&2
         exit 1
     fi
 done
-
-# Uma das duas definida é sempre engano — secret do repositório que ficou de fora, ou
-# variável com nome errado. Sem este guarda, o caso cairia no Terraform e morreria com
-# "terraform não encontrado", que não diz nada sobre a causa.
-if [[ -n "${POSTGRES_USERNAME:-}" || -n "${POSTGRES_PASSWORD:-}" ]]; then
-    for required in POSTGRES_USERNAME POSTGRES_PASSWORD; do
-        if [[ -z "${!required:-}" ]]; then
-            echo "$required não definida, e a outra credencial do banco está." >&2
-            echo "As duas andam juntas: defina as duas, ou nenhuma para ler do Terraform." >&2
-            exit 1
-        fi
-    done
-    DATABASE_USERNAME="$POSTGRES_USERNAME"
-    DATABASE_PASSWORD="$POSTGRES_PASSWORD"
-    echo "Credenciais do banco lidas das variáveis de ambiente."
-else
-    command -v terraform >/dev/null || { echo "terraform não encontrado" >&2; exit 1; }
-    DATABASE_HOST="$(terraform -chdir="$TERRAFORM_DIR" output -raw database_host)"
-    DATABASE_USERNAME="$(terraform -chdir="$TERRAFORM_DIR" output -raw database_username)"
-    DATABASE_PASSWORD="$(terraform -chdir="$TERRAFORM_DIR" output -raw database_password)"
-
-    # O endereço do banco é configuração não sensível e por isso mora no ConfigMap, que é
-    # versionado. Recriar a instância troca esse endereço, e o sintoma seria um pod que
-    # nunca fica pronto — comparar aqui transforma isso numa mensagem de erro. A
-    # comparação só é possível com o Terraform à mão; no caminho de entrega, quem acusa
-    # ConfigMap desatualizado é o `rollout status`, que não converge porque o pod não
-    # alcança o banco.
-    CONFIGURED_HOST="$(sed -n 's/^ *INFRA_HOST_POSTGRES: *//p' "$CONFIGMAP_FILE")"
-    if [[ "$CONFIGURED_HOST" != "$DATABASE_HOST" ]]; then
-        echo "O ConfigMap não aponta para o banco atual." >&2
-        echo "  Terraform: $DATABASE_HOST" >&2
-        echo "  ConfigMap: $CONFIGURED_HOST" >&2
-        echo "Atualize INFRA_HOST_POSTGRES em k8s/configmap.yaml e rode de novo." >&2
-        exit 1
-    fi
-fi
 
 # Usuário e senha do SMTP são segredo e por isso vivem aqui, enquanto host, porta e
 # remetente ficam no ConfigMap: a conta de e-mail tem ciclo de vida próprio, e trocá-la
@@ -114,18 +87,18 @@ fi
 
 # `kubectl create` sozinho falha quando o objeto já existe; passar por --dry-run=client
 # e aplicar é o que torna a reexecução possível.
-kubectl create secret generic "$ENV_SECRET" \
-    --from-literal=POSTGRES_USERNAME="$DATABASE_USERNAME" \
-    --from-literal=POSTGRES_PASSWORD="$DATABASE_PASSWORD" \
+kube create secret generic "$ENV_SECRET" \
+    --from-literal=POSTGRES_USERNAME="$POSTGRES_USERNAME" \
+    --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
     --from-literal=APP_SEED_ADMIN_PASSWORD="$APP_SEED_ADMIN_PASSWORD" \
     --from-literal=APP_SEED_MECHANIC_PASSWORD="$APP_SEED_MECHANIC_PASSWORD" \
     --from-literal=MAIL_USERNAME="$MAIL_USERNAME" \
     --from-literal=MAIL_PASSWORD="$MAIL_PASSWORD" \
-    --dry-run=client -o yaml | kubectl apply -f -
+    --dry-run=client -o yaml | kube apply -f -
 
-kubectl create secret generic "$JWT_SECRET" \
+kube create secret generic "$JWT_SECRET" \
     --from-file="$PRIVATE_PEM=$JWT_WORK_DIR/$PRIVATE_PEM" \
     --from-file="$PUBLIC_PEM=$JWT_WORK_DIR/$PUBLIC_PEM" \
-    --dry-run=client -o yaml | kubectl apply -f -
+    --dry-run=client -o yaml | kube apply -f -
 
-echo "$ENV_SECRET e $JWT_SECRET aplicados."
+echo "$ENV_SECRET e $JWT_SECRET aplicados${NAMESPACE:+ em $NAMESPACE}."

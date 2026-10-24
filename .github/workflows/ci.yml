@@ -136,10 +136,10 @@ jobs:
     timeout-minutes: 10
     env:
       TERRAFORM_VERSION: "1.16.0"
-      # Acompanha o `kubernetes_version` do control plane em
-      # infra/terraform/variables.tf; o patch vem porque o schema é publicado por
-      # versão exata. É contra ele que os manifestos são validados.
-      KUBERNETES_VERSION: "1.33.4"
+      # Acompanha o `kubernetes_version` do cluster em oficina-infra-k8s/variables.tf; o
+      # patch vem porque o schema é publicado por versão exata. É contra ele que os
+      # manifestos são validados.
+      KUBERNETES_VERSION: "1.34.1"
     steps:
       - uses: actions/checkout@v4
 
@@ -164,13 +164,21 @@ jobs:
         with:
           version: v${{ env.KUBERNETES_VERSION }}
 
+      # Cada ambiente é um overlay sobre a mesma base; renderizar os dois é o que pega um
+      # patch que deixou de casar com a base.
       - name: Renderiza os manifestos
-        run: kubectl kustomize k8s/ > rendered-manifests.yaml
+        run: |
+          for environment in homolog production; do
+            kubectl kustomize "k8s/overlays/$environment" > "rendered-$environment.yaml"
+          done
 
       # kubectl apply --dry-run=client precisaria falar com um servidor de API para
       # validar campo; o kubeconform valida contra o schema da versão do cluster
       # offline, e -strict recusa campo desconhecido em vez de ignorá-lo.
       - name: Schema dos manifestos
         run: |
-          docker run --rm -i ghcr.io/yannh/kubeconform:v0.8.0 \
-            -strict -summary -kubernetes-version "$KUBERNETES_VERSION" - < rendered-manifests.yaml
+          for environment in homolog production; do
+            echo "== $environment"
+            docker run --rm -i ghcr.io/yannh/kubeconform:v0.8.0 \
+              -strict -summary -kubernetes-version "$KUBERNETES_VERSION" - < "rendered-$environment.yaml"
+          done
