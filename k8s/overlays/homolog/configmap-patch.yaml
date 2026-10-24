@@ -9,7 +9,6 @@ data:
   INFRA_HOST_POSTGRES: oficina-homolog.cpeio3bqnmop.us-east-1.rds.amazonaws.com
 
   # Endereço por onde o cliente alcança a API, e por isso a base dos links de
-  # acompanhamento e de decisão do orçamento que saem por e-mail. Vai ser o endereço do
-  # API Gateway quando ele existir; até lá vale o default de desenvolvimento
-  # (`http://localhost:8080`) e o link do e-mail não abre para quem o recebe.
-  # APP_PUBLIC_BASE_URL: https://<id>.execute-api.us-east-1.amazonaws.com
+  # acompanhamento e de decisão do orçamento que saem por e-mail: o API Gateway de
+  # homologação (output `api_gateway_urls` do oficina-infra-k8s). Sem barra no fim.
+  APP_PUBLIC_BASE_URL: https://tnkxdt6m8h.execute-api.us-east-1.amazonaws.com
