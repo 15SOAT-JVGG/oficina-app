@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-mecanica-config
+data:
+  # Endereço do RDS de homologação (output `db_address` do oficina-infra-db, state
+  # `homolog`). Muda se a instância for recriada, e o sintoma é um pod que nunca fica
+  # pronto: o Flyway não alcança o banco.
+  INFRA_HOST_POSTGRES: oficina-homolog.cpeio3bqnmop.us-east-1.rds.amazonaws.com
+
+  # Endereço por onde o cliente alcança a API, e por isso a base dos links de
+  # acompanhamento e de decisão do orçamento que saem por e-mail. Vai ser o endereço do
+  # API Gateway quando ele existir; até lá vale o default de desenvolvimento
+  # (`http://localhost:8080`) e o link do e-mail não abre para quem o recebe.
+  # APP_PUBLIC_BASE_URL: https://<id>.execute-api.us-east-1.amazonaws.com
