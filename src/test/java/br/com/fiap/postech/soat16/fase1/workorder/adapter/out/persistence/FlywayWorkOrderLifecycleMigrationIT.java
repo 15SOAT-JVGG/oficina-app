@@ -178,6 +178,9 @@ class FlywayWorkOrderLifecycleMigrationIT {
                     "WAITING_APPROVAL",
                     "COMPLETED");
 
+            // Os rollbacks desfazem as versões da mais nova para a mais antiga; sem isso o Flyway
+            // recusaria reaplicar a V2 por baixo de uma versão posterior ainda registrada.
+            executeResource("db/rollback/U3__add_customer_active_status.sql");
             executeResource("db/rollback/U2__migrate_work_order_status_lifecycle.sql");
 
             assertEquals("APPROVED", statusOf(APPROVED_ID));

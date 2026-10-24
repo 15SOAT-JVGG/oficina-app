@@ -13,6 +13,7 @@ public record CustomerResult(
         String phoneNumber,
         String document,
         String documentType,
+        boolean active,
         OffsetDateTime createdAt
 ) {
 
@@ -28,6 +29,7 @@ public record CustomerResult(
                 customer.getPhoneNumber(),
                 customer.getDocument(),
                 customer.getDocumentType() != null ? customer.getDocumentType().name() : null,
+                customer.isActive(),
                 customer.getCreatedAt());
     }
 }

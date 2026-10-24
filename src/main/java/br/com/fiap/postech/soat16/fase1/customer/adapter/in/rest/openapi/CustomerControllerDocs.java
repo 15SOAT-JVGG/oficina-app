@@ -7,6 +7,7 @@ import jakarta.ws.rs.BeanParam;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
@@ -98,6 +99,32 @@ public interface CustomerControllerDocs {
             @PathParam("id") UUID id,
             @RequestBody(description = "Updated customer data. Document (CPF/CNPJ) is not updatable.")
             @Valid CustomerRequestDto body);
+
+    @PATCH
+    @Path("/{id}/activate")
+    @Operation(summary = "Activate customer",
+            description = "Allows the customer to authenticate again by CPF.")
+    @APIResponse(responseCode = "200", description = "Customer activated",
+            content = @Content(mediaType = MediaType.APPLICATION_JSON,
+                    schema = @Schema(implementation = CustomerResponseDto.class)))
+    @APIResponse(responseCode = "404", description = "Customer not found")
+    Uni<CustomerResponseDto> activate(
+            @Parameter(name = "id", description = "Customer identifier",
+                    required = true, in = ParameterIn.PATH)
+            @PathParam("id") UUID id);
+
+    @PATCH
+    @Path("/{id}/deactivate")
+    @Operation(summary = "Deactivate customer",
+            description = "Blocks authentication by CPF. The customer record and history are kept.")
+    @APIResponse(responseCode = "200", description = "Customer deactivated",
+            content = @Content(mediaType = MediaType.APPLICATION_JSON,
+                    schema = @Schema(implementation = CustomerResponseDto.class)))
+    @APIResponse(responseCode = "404", description = "Customer not found")
+    Uni<CustomerResponseDto> deactivate(
+            @Parameter(name = "id", description = "Customer identifier",
+                    required = true, in = ParameterIn.PATH)
+            @PathParam("id") UUID id);
 
     @DELETE
     @Path("/{id}")

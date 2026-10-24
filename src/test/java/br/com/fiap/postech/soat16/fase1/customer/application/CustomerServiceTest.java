@@ -2,6 +2,7 @@ package br.com.fiap.postech.soat16.fase1.customer.application;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -65,7 +66,8 @@ class CustomerServiceTest {
                 "john@example.com",
                 "5511987654321",
                 CPF_SEM_MASCARA,
-                DocumentType.CPF);
+                DocumentType.CPF,
+                true);
     }
 
     @Test
@@ -250,6 +252,60 @@ class CustomerServiceTest {
             assertThrows(
                     CustomerNotFoundException.class,
                     () -> service.update(updateCommand()).await().indefinitely());
+
+            verify(repository, never()).save(any(Customer.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("activate / deactivate")
+    class Status {
+
+        @Test
+        @DisplayName("deve desativar o cliente existente e persistir o novo status")
+        void shouldDeactivateCustomer() {
+            when(repository.findByCustomerId(CUSTOMER_ID)).thenReturn(Uni.createFrom().item(customer));
+            when(repository.save(customer)).thenReturn(Uni.createFrom().item(customer));
+
+            var result = service.deactivate(CUSTOMER_ID).await().indefinitely();
+
+            assertFalse(result.active());
+            assertFalse(customer.isActive());
+        }
+
+        @Test
+        @DisplayName("deve reativar o cliente inativo e persistir o novo status")
+        void shouldActivateCustomer() {
+            customer.deactivate();
+            when(repository.findByCustomerId(CUSTOMER_ID)).thenReturn(Uni.createFrom().item(customer));
+            when(repository.save(customer)).thenReturn(Uni.createFrom().item(customer));
+
+            var result = service.activate(CUSTOMER_ID).await().indefinitely();
+
+            assertTrue(result.active());
+            assertTrue(customer.isActive());
+        }
+
+        @Test
+        @DisplayName("deve lançar CustomerNotFoundException ao desativar cliente inexistente")
+        void shouldThrowWhenDeactivatingMissingCustomer() {
+            when(repository.findByCustomerId(CUSTOMER_ID)).thenReturn(Uni.createFrom().nullItem());
+
+            assertThrows(
+                    CustomerNotFoundException.class,
+                    () -> service.deactivate(CUSTOMER_ID).await().indefinitely());
+
+            verify(repository, never()).save(any(Customer.class));
+        }
+
+        @Test
+        @DisplayName("deve lançar CustomerNotFoundException ao ativar cliente inexistente")
+        void shouldThrowWhenActivatingMissingCustomer() {
+            when(repository.findByCustomerId(CUSTOMER_ID)).thenReturn(Uni.createFrom().nullItem());
+
+            assertThrows(
+                    CustomerNotFoundException.class,
+                    () -> service.activate(CUSTOMER_ID).await().indefinitely());
 
             verify(repository, never()).save(any(Customer.class));
         }

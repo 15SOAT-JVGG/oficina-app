@@ -26,6 +26,8 @@ public class WorkOrderRepository
 
     private static final String OPERATIONAL_QUEUE_QUERY = buildOperationalQueueQuery();
 
+    private static final String CUSTOMER_FILTER = "customer.id = ?1";
+
     private final WorkOrderHistoryRepository historyRepository;
 
     @Override
@@ -61,6 +63,19 @@ public class WorkOrderRepository
         return find("id = ?1", id).firstResult()
                 .invoke(found -> Log.infof("WorkOrder lookup: id=%s found=%b", id, found != null))
                 .map(WorkOrderPersistenceMapper::toDomain);
+    }
+
+    @Override
+    public Uni<List<WorkOrder>> findPageByCustomerId(UUID customerId, int page, int size) {
+        return find(CUSTOMER_FILTER + " ORDER BY openedAt DESC, id ASC", customerId).page(page, size).list()
+                .map(entities -> entities.stream()
+                        .map(WorkOrderPersistenceMapper::toDomain)
+                        .toList());
+    }
+
+    @Override
+    public Uni<Long> countByCustomerId(UUID customerId) {
+        return count(CUSTOMER_FILTER, customerId);
     }
 
     @Override

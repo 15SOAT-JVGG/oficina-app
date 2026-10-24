@@ -119,6 +119,10 @@ public class WorkOrder extends AuditableEntity {
         return Optional.empty();
     }
 
+    public boolean isOwnedBy(UUID customerId) {
+        return customerId != null && customer != null && customerId.equals(customer.getId());
+    }
+
     public boolean hasReservedStock() {
         return status == WorkOrderStatus.IN_PROGRESS;
     }

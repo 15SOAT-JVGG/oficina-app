@@ -27,7 +27,8 @@ class CustomerResultTest {
                 "john@example.com",
                 "5511987654321",
                 "52998224725",
-                DocumentType.CPF);
+                DocumentType.CPF,
+                true);
         customer.setCreatedAt(createdAt);
 
         CustomerResult result = CustomerResult.from(customer);
