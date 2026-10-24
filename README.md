@@ -6,12 +6,13 @@ Back-end do sistema de uma oficina mecânica — 16SOAT, Tech Challenge. Constru
 serviços, peças/insumos (com controle de estoque) e orçamentos**, além de um **canal público** para o
 cliente acompanhar e autorizar o serviço.
 
-A **Fase 2** tira a aplicação do Docker Compose e a coloca num **cluster EKS provisionado por
-Terraform**, com **Postgres gerenciado no RDS**, exposição por **Load Balancer**, configuração em
-`ConfigMap`, credenciais em `Secret`, **escalabilidade automática** por consumo de CPU e memória, e um
-**caminho de entrega automatizado** que a cada push em `homolog` ou `production` constrói, publica, implanta e verifica.
+A aplicação roda num **cluster EKS** com **Postgres gerenciado no RDS**, exposição por **Load Balancer**,
+configuração em `ConfigMap`, credenciais em `Secret`, **escalabilidade automática** por consumo de CPU
+e memória, e um **caminho de entrega automatizado** que a cada push em `homolog` ou `production`
+constrói, publica, implanta e verifica. A infraestrutura é código Terraform em repositórios próprios,
+descritos em [Repositórios e recursos de nuvem](#repositórios-e-recursos-de-nuvem).
 
-Este README é sobre **arquitetura, infraestrutura e operação** — é o que a Fase 2 entrega. A
+Este README é sobre **arquitetura, infraestrutura e operação**. A
 referência da aplicação em si (funcionalidades, variáveis de configuração, autenticação, mapa de
 endpoints, ciclo de vida da OS, testes e build) está em **[docs/FASE-1.md](docs/FASE-1.md)**, o
 entregável da Fase 1, que continua valendo por inteiro: nada de regra de negócio ou contrato de API
@@ -24,11 +25,10 @@ mudou aqui.
 - [Objetivos desta fase](#objetivos-desta-fase)
 - [Arquitetura](#arquitetura)
   - [Componentes da aplicação](#componentes-da-aplicação)
-  - [Infraestrutura provisionada](#infraestrutura-provisionada)
+  - [Infraestrutura](#infraestrutura)
   - [Fluxo de deploy](#fluxo-de-deploy)
-- [Recursos de nuvem criados](#recursos-de-nuvem-criados)
+- [Repositórios e recursos de nuvem](#repositórios-e-recursos-de-nuvem)
 - [Executando localmente](#executando-localmente)
-- [Provisionando a infraestrutura](#provisionando-a-infraestrutura)
 - [Implantando no cluster](#implantando-no-cluster)
 - [Escalabilidade automática](#escalabilidade-automática)
 - [Migrations no start da aplicação](#migrations-no-start-da-aplicação)
@@ -44,11 +44,11 @@ mudou aqui.
 | Objetivo                   | Como é atendido                                                                                              |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Rodar em Kubernetes        | Cluster EKS com `Deployment`, `Service`, `ConfigMap`, `Secret` e `HorizontalPodAutoscaler` em [`k8s/`](k8s/) |
-| Infraestrutura como Código | Todo o ambiente nasce de um `terraform apply` em [`infra/terraform/`](infra/terraform/)                      |
+| Infraestrutura como Código | Cluster e banco em Terraform, em repositórios próprios (ver [Repositórios](#repositórios-e-recursos-de-nuvem)) |
 | Banco de dados gerenciado  | Postgres 16 no RDS, privado, alcançável apenas pelos nós do cluster                                          |
 | Escalabilidade automática  | HPA de 1 a 6 réplicas por CPU e memória, alimentado pelo `metrics-server`                                    |
-| Entrega automatizada       | Dois workflows do GitHub Actions: provisionamento manual e entrega a cada merge                              |
-| Reprodutibilidade          | Este README e o [`infra/README.md`](infra/README.md) levam do zero ao ambiente no ar                         |
+| Entrega automatizada       | Push em `homolog` ou `production` constrói, publica e implanta no ambiente correspondente                    |
+| Reprodutibilidade          | Este README leva do ambiente provisionado à aplicação no ar                                                  |
 
 ### Stack
 
@@ -62,8 +62,8 @@ mudou aqui.
 | Observabilidade | SmallRye Health · OpenTelemetry (desabilitado por default) |
 | Testes          | JUnit 5, Mockito, REST-assured, Testcontainers             |
 | Container       | Docker (build multistage, runtime UBI9 non-root)           |
-| Orquestração    | Kubernetes 1.33 (Amazon EKS)                               |
-| IaC             | Terraform >= 1.10, provider AWS ~> 6.0, state no S3        |
+| Orquestração    | Kubernetes 1.34 (Amazon EKS)                               |
+| IaC             | Terraform >= 1.10 nos repositórios `oficina-infra-*`       |
 | CI/CD           | GitHub Actions                                             |
 
 ---
@@ -111,45 +111,44 @@ Contextos: `auth`, `customer`, `part`, `servicecatalog`, `vehicle`, `worker`, `w
 `shared` com os utilitários transversais. As regras de dependência entre camadas não são convenção de
 revisão: são verificadas por testes de arquitetura a cada build.
 
-### Infraestrutura provisionada
+### Infraestrutura
 
-O que o `terraform apply` cria está ligado a ele por seta cheia. Ficam de fora a VPC, as subnets e as
-roles IAM, que a conta já entrega prontas — é do **AWS Academy (Learner Lab)**, que não concede
-`iam:CreateRole` ([ADR-0001](docs/adr/0001-eks-provisionado-com-roles-do-lab-na-vpc-default.md)) — e o
-bucket de state, que precisa existir **antes** do primeiro `init` e por isso vem de um script
-(`bootstrap-tf-state.sh`); o Terraform só o usa, daí a seta pontilhada.
+O cluster e o banco **não** são provisionados por este repositório: o cluster vem do
+`oficina-infra-k8s` e o RDS do `oficina-infra-db`, cada um com a própria pipeline. Os dois ambientes
+dividem **um cluster** e se isolam por namespace e por um RDS próprio — um cluster EKS cobra por hora,
+e o Learner Lab tem crédito limitado. Ficam de fora a VPC, as subnets e as roles IAM, que a conta já
+entrega prontas: é o **AWS Academy (Learner Lab)**, que não concede `iam:CreateRole`
+([ADR-0001](docs/adr/0001-eks-provisionado-com-roles-do-lab-na-vpc-default.md)).
 
 ```mermaid
 flowchart TB
     internet(["Internet"])
-    tf(["terraform apply"])
 
     subgraph aws["AWS · Learner Lab · us-east-1"]
-        s3[("S3<br/>state do Terraform")]
-        ecr["ECR · oficina-mecanica<br/>imagem com tag = SHA do commit"]
+        ecr["ECR · oficina-app<br/>imagem com tag = SHA do commit"]
 
-        subgraph vpc["VPC default · subnets das AZs que ofertam t3.medium"]
+        subgraph vpc["VPC default"]
             elb["ELB clássico<br/>Service type=LoadBalancer"]
 
-            subgraph eks["EKS 1.33 · oficina-mecanica"]
-                cp["Control plane<br/>endpoint público e privado"]
-                config["ConfigMap e Secrets<br/>config · env · jwt"]
+            subgraph eks["EKS 1.34 · oficina"]
+                cp["Control plane"]
                 metrics["Addon metrics-server"]
-                hpa["HorizontalPodAutoscaler<br/>1 a 6 réplicas"]
 
                 subgraph nodegroup["Node group · t3.medium · 2 a 4 nós"]
-                    pods["Pods oficina-mecanica<br/>probes · requests e limits · non-root"]
+                    subgraph nsh["namespace homolog"]
+                        config["ConfigMap e Secrets"]
+                        hpa["HPA · 1 a 6 réplicas"]
+                        pods["Pods oficina-mecanica<br/>probes · requests e limits · non-root"]
+                    end
+                    nsp["namespace production<br/>mesma estrutura"]
                 end
             end
 
-            rds[("RDS PostgreSQL 16<br/>db.t3.micro · gp3 criptografado<br/>sem acesso público")]
+            rdsh[("RDS oficina-homolog<br/>PostgreSQL 16 · sem acesso público")]
+            rdsp[("RDS oficina-production")]
         end
     end
 
-    tf -. "state" .-> s3
-    tf --> cp
-    tf --> rds
-    tf --> ecr
     internet --> elb
     elb --> pods
     cp -. "agenda" .-> pods
@@ -158,19 +157,17 @@ flowchart TB
     pods -. "métricas" .-> metrics
     metrics -. "utilização" .-> hpa
     hpa -- "ajusta réplicas" --> pods
-    pods -- "5432, apenas do SG do cluster" --> rds
+    pods -- "5432, só dentro da VPC" --> rdsh
+    nsp -.-> rdsp
 ```
 
-O detalhe de cada recurso, das restrições da conta e do que fazer quando o lab é reiniciado está em
-[`infra/README.md`](infra/README.md).
+O ambiente `production` só é provisionado perto da entrega, para não gastar crédito à toa.
 
 ### Fluxo de deploy
 
-Três workflows cobrem o caminho do código, com responsabilidades separadas: qualidade no pull
-request, provisionamento por disparo manual e entrega no merge. A divisão está registrada em
-[ADR-0003](docs/adr/0003-pipeline-dividida-entre-provisionamento-e-entrega.md). Um quarto,
-`pr-title-lint.yml`, fica fora do desenho porque não toca em build nem em ambiente: só valida o
-título do pull request contra Conventional Commits.
+Três workflows cobrem o caminho do código: qualidade no pull request, entrega por branch e
+`pr-title-lint.yml`, que só valida o título do pull request contra Conventional Commits. A `main` é
+integração e não implanta nada; a promoção é o merge em `homolog` e, depois, em `production`.
 
 ```mermaid
 flowchart TB
@@ -183,10 +180,11 @@ flowchart TB
         verify["./mvnw verify<br/>testes · qualidade · cobertura"]
         owasp["OWASP Dependency-Check<br/>reprova em CVSS 8 ou mais"]
         sonar["SonarQube<br/>quality gate"]
-        iac["Validação de IaC<br/>terraform fmt e validate<br/>kubectl kustomize e kubeconform"]
+        manifests["Validação dos manifestos<br/>kubectl kustomize e kubeconform"]
     end
 
-    merge["Push em homolog ou production"]
+    main["Merge na main"]
+    promo["Merge em homolog ou production"]
 
     subgraph deploy["Workflow Deploy · deploy.yml · automático"]
         direction TB
@@ -195,24 +193,14 @@ flowchart TB
         dapply["Deploy no cluster<br/>cria os Secret · kubectl apply -k k8s/overlays/&lt;ambiente&gt;<br/>rollout status · smoke test"]
     end
 
-    operador["Operador"]
-
-    subgraph infra["Workflow Infra · infra.yml · manual"]
-        direction TB
-        tplan["terraform init · validate · plan"]
-        tapply["terraform apply<br/>somente quando action = apply"]
-    end
-
-    ambiente["EKS · RDS · ECR"]
-    cluster["Aplicação no ar"]
+    cluster["Aplicação no ar<br/>no namespace do ambiente"]
 
     pr --> gitleaks --> semgrep --> verify --> owasp --> sonar
-    pr --> iac
-    sonar --> merge
-    iac --> merge
-    merge --> dbuild --> dimage --> dapply --> cluster
-    operador -- "workflow_dispatch" --> tplan --> tapply --> ambiente
-    ambiente -. "pré-requisito" .-> dapply
+    pr --> manifests
+    sonar --> main
+    manifests --> main
+    main --> promo
+    promo --> dbuild --> dimage --> dapply --> cluster
 ```
 
 A etapa que falha interrompe a entrega: teste vermelho não gera imagem, e imagem que não publicou não
@@ -222,36 +210,27 @@ recupera na listagem contra o endereço público — se ele passa, o ELB, o pod,
 
 ---
 
-## Recursos de nuvem criados
+## Repositórios e recursos de nuvem
 
-Todos nascem e morrem com o Terraform de [`infra/terraform/`](infra/terraform/).
+O projeto é dividido em quatro repositórios, cada um com CI/CD e deploy automático por branch
+(`main` integra, `homolog` e `production` implantam):
 
-| Recurso                  | Tipo                                  | O que é                                                                   |
-| ------------------------ | ------------------------------------- | ------------------------------------------------------------------------- |
-| `oficina-mecanica`       | `aws_ecr_repository`                  | Registry da imagem da aplicação, com scan on push                         |
-| —                        | `aws_ecr_lifecycle_policy`            | Expira imagens além das 10 mais recentes                                  |
-| `oficina-mecanica`       | `aws_eks_cluster`                     | Control plane do Kubernetes 1.33, endpoint público e privado              |
-| `oficina-mecanica-nodes` | `aws_eks_node_group`                  | Nós gerenciados `t3.medium` (AL2023), de 2 a 4 instâncias                 |
-| `metrics-server`         | `aws_eks_addon`                       | Fonte de métricas de recurso, sem a qual o HPA não escala                 |
-| `oficina-mecanica-db`    | `aws_db_instance`                     | Postgres 16 em `db.t3.micro`, disco gp3 criptografado, sem acesso público |
-| `oficina-mecanica-db`    | `aws_db_subnet_group`                 | Subnets onde a instância pode nascer                                      |
-| `oficina-mecanica-db`    | `aws_security_group`                  | Fecha o banco; a única entrada é a regra abaixo                           |
-| —                        | `aws_vpc_security_group_ingress_rule` | Libera a porta 5432 só para o security group dos nós do cluster           |
-| —                        | `random_password`                     | Senha do banco, gerada no apply e nunca versionada                        |
+| Repositório | O que contém | Provisiona / entrega |
+| --- | --- | --- |
+| `oficina-app` (este) | API Quarkus, manifestos `k8s/`, scripts de entrega | Imagem no ECR e a aplicação nos namespaces `homolog` e `production` |
+| `oficina-infra-k8s` | Terraform do cluster | EKS `oficina`, node group `t3.medium` de 2 a 4 nós, ECR `oficina-app`, `metrics-server` |
+| `oficina-infra-db` | Terraform do banco | RDS PostgreSQL 16, um por ambiente (`oficina-homolog`, `oficina-production`), privado |
+| `oficina-lambda-auth` | Função de autenticação por CPF (Go) | Lambda que valida o CPF e emite o JWT aceito pela API |
 
-Criados fora do `terraform apply`:
+Criados fora do Terraform:
 
-| Recurso            | Origem                                                                                     |
-| ------------------ | ------------------------------------------------------------------------------------------ |
-| Bucket S3 do state | `infra/scripts/bootstrap-tf-state.sh` — o backend precisa existir antes do primeiro `init` |
-| ELB clássico       | Materializado pelo EKS a partir do `Service type=LoadBalancer`; não está no state          |
+| Recurso            | Origem                                                                            |
+| ------------------ | --------------------------------------------------------------------------------- |
+| ELB clássico       | Materializado pelo EKS a partir do `Service type=LoadBalancer`; não está no state |
+| Namespaces e acesso da pipeline | `infra/scripts/create-deploy-kubeconfig.sh`, uma vez por ambiente    |
 
-Não criados, por escolha ou por restrição da conta:
-
-| Recurso                                       | Origem                                                       |
-| --------------------------------------------- | ------------------------------------------------------------ |
-| VPC default e subnets                         | Já existem na conta; resolvidos por data source              |
-| `*-LabEksClusterRole-*`, `*-LabEksNodeRole-*` | Provisionadas pela stack do lab; resolvidas por `name_regex` |
+Não criados, por restrição da conta: a VPC default, as subnets e as roles IAM já existem no Learner Lab
+e são reaproveitadas.
 
 ---
 
@@ -311,47 +290,21 @@ infra/scripts/smoke-test.sh http://localhost:8080
 
 ---
 
-## Provisionando a infraestrutura
+## Acessando o cluster
 
-Pré-requisitos: `terraform >= 1.10`, `aws` CLI, `kubectl` e uma sessão ativa do Learner Lab
-(`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`).
+O cluster e o banco são provisionados pelos repositórios `oficina-infra-k8s` e `oficina-infra-db`
+(ver [Repositórios](#repositórios-e-recursos-de-nuvem)). Com uma sessão ativa do Learner Lab e o
+cluster já criado, o acesso local é:
 
 ```bash
-# 1. Uma vez por conta: cria o bucket de state. Em outra conta, ajuste o nome do
-#    bucket no bloco backend de infra/terraform/versions.tf antes de rodar.
-infra/scripts/bootstrap-tf-state.sh
-
-# 2. Confere o que a conta autoriza. Rode de novo depois de cada reset do lab:
-#    IDs de rede e nomes de role mudam junto.
-infra/scripts/verify-lab.sh infra/scripts/lab-capabilities.md
-
-# 3. Cria o cluster, o banco e o registry. Leva de 15 a 20 minutos.
-terraform -chdir=infra/terraform init
-terraform -chdir=infra/terraform apply
-
-# 4. Acesso ao cluster, direto das saídas do Terraform.
-$(terraform -chdir=infra/terraform output -raw kubeconfig_command)
+aws eks update-kubeconfig --name oficina --region us-east-1
 kubectl get nodes
+kubectl top nodes     # se responder, o metrics-server está de pé e o HPA tem base de cálculo
 ```
 
-Ao fim de cada sessão longa, `terraform -chdir=infra/terraform destroy` devolve o crédito do lab. Se
-houver um `Service type=LoadBalancer` no cluster, apague-o com `kubectl` **antes** do destroy, ou o ELB
-fica órfão na conta — ele não está no state.
-
-O mesmo Terraform também roda pelo GitHub Actions, no workflow **Workflow Infra**
-(`.github/workflows/infra.yml`), com disparo **manual** e as ações `plan` (default) e `apply`. Nenhum
-merge inicia vinte minutos de convergência de control plane por acidente.
-
-Os comandos acima valem para qualquer conta. Região, nome do projeto, versão do cluster, tamanho do
-node group e classe do banco são **variáveis** do Terraform, todas com default — `aws_region` é
-`us-east-1`. Para provisionar em outra região, passe `-var aws_region=...` ou ajuste o default, e
-confira antes quais AZs daquela região ofertam a instância dos nós, porque é esse filtro que decide
-as subnets. O que está fixo no código e precisa ser editado à mão numa conta nova são três valores: o
-nome do bucket no bloco `backend` de `versions.tf` e os dois da tabela em
-[Implantando no cluster](#implantando-no-cluster).
-
-Variáveis, saídas, o que fazer quando o lab é reiniciado e como acessar o banco criado:
-[`infra/README.md`](infra/README.md).
+As credenciais do lab (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) são
+temporárias. Quando expiram, renove-as no console do lab e atualize os secrets da organização que a
+pipeline usa.
 
 ---
 
@@ -483,8 +436,8 @@ decide é o `HorizontalPodAutoscaler`, que compara o consumo dos pods com os `re
 | Subida   | imediata, até 2 pods a cada 15s          |
 | Descida  | 1 pod a cada 30s, após 1 min de calmaria |
 
-A fonte das métricas é o `metrics-server`, instalado pelo Terraform como addon gerenciado do EKS. Um
-cluster nasce sem ele, e sem ele o HPA lê `<unknown>` e nunca escala.
+A fonte das métricas é o `metrics-server`, instalado pelo `oficina-infra-k8s` como addon gerenciado do EKS.
+Um cluster nasce sem ele, e sem ele o HPA lê `<unknown>` e nunca escala.
 
 Para reproduzir a demonstração, dois terminais — um observando `kubectl get hpa,pods -w` e outro
 gerando carga com `infra/scripts/load-test.sh`, uma rajada de logins (o endpoint mais caro em CPU da
@@ -566,15 +519,15 @@ cluster, o consumo das APIs contra o ambiente implantado e a escalabilidade auto
 
 A esteira de CI (`.github/workflows/ci.yml`) adiciona, a cada pull request: **Gitleaks** (segredos),
 **Semgrep** (SAST), **OWASP Dependency-Check** (SCA, reprovando em CVSS >= 8), **SonarQube** (quality
-gate) e a **validação de IaC** — `terraform fmt` e `validate` com `-backend=false`, mais
-`kubectl kustomize` e `kubeconform -strict` nos manifestos de `k8s/`. O resultado consolidado está em
+gate) e a **validação dos manifestos** — `kubectl kustomize` e `kubeconform -strict` nos
+overlays de `k8s/`. O Terraform é validado nos próprios repositórios `oficina-infra-*`. O resultado consolidado está em
 [docs/RELATORIO-VULNERABILIDADES.md](docs/RELATORIO-VULNERABILIDADES.md), e o relatório bruto de
 dependências em `dependency-check-report.zip`.
 
 Postura do ambiente implantado: container **non-root** sem escalonamento de privilégio e com todas as
 capabilities removidas; banco **sem acesso público**, alcançável apenas pelo security group dos nós;
-TLS obrigatório na conexão com o RDS; senha do banco gerada pelo Terraform e mantida só no state
-criptografado; nenhuma chave privada na imagem ou no repositório.
+TLS obrigatório na conexão com o RDS; senha do banco fornecida por secret e nunca versionada;
+nenhuma chave privada na imagem ou no repositório.
 
 > Em produção, defina `SWAGGER_UI_ENABLED=false`.
 
@@ -585,10 +538,11 @@ criptografado; nenhuma chave privada na imagem ou no repositório.
 | Documento                                                                       | Conteúdo                                                                                                             |
 | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | [docs/FASE-1.md](docs/FASE-1.md)                                                | A aplicação: funcionalidades, configuração, autenticação JWT, mapa de endpoints, ciclo de vida da OS, testes e build |
-| [`infra/README.md`](infra/README.md)                                            | Runbook completo da infraestrutura: recursos, variáveis, reset do lab, segredos, smoke test e demonstração do HPA    |
-| [ADR-0001](docs/adr/0001-eks-provisionado-com-roles-do-lab-na-vpc-default.md)   | Por que o EKS usa recursos Terraform diretos, as roles do lab e a VPC default                                        |
+| [`infra/README.md`](infra/README.md)                                            | Runbook de entrega e operação: ambientes, segredos, deploy, smoke test e demonstração do HPA    |
+| [ADR-0001](docs/adr/0001-eks-provisionado-com-roles-do-lab-na-vpc-default.md)   | Por que o EKS usa recursos Terraform diretos e a VPC default (parcialmente substituído pelo ADR-0007)                                        |
 | [ADR-0002](docs/adr/0002-deploy-no-cluster-via-kubeconfig-de-serviceaccount.md) | Por que o deploy autentica por `ServiceAccount` e não por credencial da AWS                                          |
-| [ADR-0003](docs/adr/0003-pipeline-dividida-entre-provisionamento-e-entrega.md)  | Por que provisionamento e entrega são workflows separados                                                            |
+| [ADR-0003](docs/adr/0003-pipeline-dividida-entre-provisionamento-e-entrega.md)  | Por que provisionamento e entrega eram workflows separados (substituído pelo ADR-0007)                                                            |
+| [ADR-0007](docs/adr/0007-quatro-repositorios-com-deploy-por-branch-e-um-cluster-para-dois-ambientes.md) | Quatro repositórios, deploy por branch e um cluster para dois ambientes
 | [WORKORDER.md](WORKORDER.md)                                                    | Fluxo detalhado da Ordem de Serviço                                                                                  |
 | [docs/MODELO-RELACIONAL.md](docs/MODELO-RELACIONAL.md)                          | Modelo relacional do schema `oficina_mecanica`                                                                       |
 | [docs/RELATORIO-VULNERABILIDADES.md](docs/RELATORIO-VULNERABILIDADES.md)        | Relatório de segurança consolidado                                                                                   |

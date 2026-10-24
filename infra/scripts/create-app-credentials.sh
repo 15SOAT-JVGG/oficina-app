@@ -71,9 +71,21 @@ fi
 JWT_WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$JWT_WORK_DIR"' EXIT
 
+# Decodifica um secret em base64 para arquivo, dizendo qual deles está inválido — o erro
+# cru do `base64` ("invalid input") não diz se o problema é a chave privada ou a pública.
+# Espaços e quebras de linha são descartados: colar o valor no GitHub costuma trazer uma.
+decode_pem_secret() {
+    local variable_name="$1" output_file="$2"
+    if ! tr -d '[:space:]' <<<"${!variable_name}" | base64 --decode >"$output_file" 2>/dev/null || [[ ! -s "$output_file" ]]; then
+        echo "$variable_name não é um base64 válido." >&2
+        echo "Regrave o secret com a saída de infra/scripts/generate-jwt-pair.sh." >&2
+        exit 1
+    fi
+}
+
 if [[ -n "${JWT_PRIVATE_KEY_B64:-}" && -n "${JWT_PUBLIC_KEY_B64:-}" ]]; then
-    base64 --decode <<<"$JWT_PRIVATE_KEY_B64" >"$JWT_WORK_DIR/$PRIVATE_PEM"
-    base64 --decode <<<"$JWT_PUBLIC_KEY_B64" >"$JWT_WORK_DIR/$PUBLIC_PEM"
+    decode_pem_secret JWT_PRIVATE_KEY_B64 "$JWT_WORK_DIR/$PRIVATE_PEM"
+    decode_pem_secret JWT_PUBLIC_KEY_B64 "$JWT_WORK_DIR/$PUBLIC_PEM"
     echo "Par RS256 lido das variáveis de ambiente."
 elif [[ -s "$JWT_DIR/$PRIVATE_PEM" && -s "$JWT_DIR/$PUBLIC_PEM" ]]; then
     cp "$JWT_DIR/$PRIVATE_PEM" "$JWT_DIR/$PUBLIC_PEM" "$JWT_WORK_DIR/"
