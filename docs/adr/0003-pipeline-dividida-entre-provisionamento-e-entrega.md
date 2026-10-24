@@ -1,5 +1,10 @@
 # Pipeline dividida entre provisionamento manual e entrega automática
 
+> **Status: substituído pelo [ADR-0007](0007-quatro-repositorios-com-deploy-por-branch-e-um-cluster-para-dois-ambientes.md).**
+> O provisionamento deixou de ser um workflow manual deste repositório: o Terraform vive em
+> `oficina-infra-k8s` e `oficina-infra-db`, e roda por branch. O texto abaixo é mantido como registro
+> do raciocínio da época.
+
 A automação de CI/CD é dividida em dois workflows: um de provisionamento, disparado manualmente
 (`workflow_dispatch`), que roda o Terraform do EKS e do RDS; e um de entrega, que constrói a imagem,
 publica no ECR, aplica os manifestos de `/k8s` e executa as migrations. O "deploy do banco de dados"

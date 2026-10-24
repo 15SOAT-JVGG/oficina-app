@@ -1,5 +1,12 @@
 # EKS provisionado com recursos Terraform diretos, reusando as roles do lab e a VPC default
 
+> **Status: parcialmente substituído pelo [ADR-0007](0007-quatro-repositorios-com-deploy-por-branch-e-um-cluster-para-dois-ambientes.md).**
+> A decisão de declarar os recursos à mão, sem o módulo da comunidade, e de reaproveitar a VPC default
+> continua valendo; o Terraform agora vive em `oficina-infra-k8s` e `oficina-infra-db`, e
+> `infra/terraform` e `infra/scripts/verify-lab.sh` deixaram de existir neste repositório. A escolha
+> das roles dedicadas de EKS descrita abaixo era da conta anterior: na conta atual o cluster e o grupo
+> de nós usam a `LabRole`. O texto abaixo é mantido como registro do raciocínio da época.
+
 O cluster Kubernetes e o RDS da Fase 2 rodam numa conta AWS Academy (Learner Lab), que não concede
 `iam:CreateRole`. O Terraform em `infra/terraform` declara os recursos diretamente
 (`aws_eks_cluster`, `aws_eks_node_group`, `aws_db_instance`) reusando roles pré-existentes e a VPC

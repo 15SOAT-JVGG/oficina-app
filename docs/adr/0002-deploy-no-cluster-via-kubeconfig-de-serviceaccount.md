@@ -16,8 +16,8 @@ de vida da sessão do lab.
 ## Consequences
 
 O job de deploy não usa credencial AWS alguma. Os jobs que precisam da AWS de fato usam as
-credenciais temporárias do lab e por isso ficam isolados dele: o `terraform apply` da infraestrutura
-é de disparo manual, e o push da imagem no ECR é um job separado no caminho de entrega, que confere a
+credenciais temporárias do lab e por isso ficam isolados dele: o `terraform apply` roda nas pipelines dos
+repositórios `oficina-infra-*`, e o push da imagem no ECR é um job separado no caminho de entrega, que confere a
 sessão com `aws sts get-caller-identity` antes de qualquer outra coisa — sessão vencida falha em
 segundos e o cluster não é tocado. O token da `ServiceAccount` é de longa duração e concede permissão
 no cluster: se vazar, não expira sozinho, e a mitigação é apagar a `ServiceAccount`.
