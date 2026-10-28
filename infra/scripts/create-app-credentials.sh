@@ -83,6 +83,12 @@ decode_pem_secret() {
     fi
 }
 
+if [[ -n "${JWT_PRIVATE_KEY_B64:-}" && -z "${JWT_PUBLIC_KEY_B64:-}" ]] || \
+   [[ -z "${JWT_PRIVATE_KEY_B64:-}" && -n "${JWT_PUBLIC_KEY_B64:-}" ]]; then
+    echo "JWT_PRIVATE_KEY_B64 e JWT_PUBLIC_KEY_B64 devem ser definidos em conjunto." >&2
+    exit 1
+fi
+
 if [[ -n "${JWT_PRIVATE_KEY_B64:-}" && -n "${JWT_PUBLIC_KEY_B64:-}" ]]; then
     decode_pem_secret JWT_PRIVATE_KEY_B64 "$JWT_WORK_DIR/$PRIVATE_PEM"
     decode_pem_secret JWT_PUBLIC_KEY_B64 "$JWT_WORK_DIR/$PUBLIC_PEM"
@@ -94,6 +100,26 @@ else
     echo "Par RS256 não encontrado." >&2
     echo "Defina JWT_PRIVATE_KEY_B64 e JWT_PUBLIC_KEY_B64, ou gere um par local:" >&2
     echo "  infra/scripts/generate-jwt-pair.sh" >&2
+    exit 1
+fi
+
+# Recusa um par inconsistente antes de gravá-lo: o login da Lambda assina com a chave
+# privada, e tanto a aplicação quanto o Authorizer precisam validar com a chave pública
+# correspondente. Comparar a representação DER normalizada aceita PEMs equivalentes.
+PRIVATE_PUBLIC_DER="$JWT_WORK_DIR/private-public.der"
+PUBLIC_DER="$JWT_WORK_DIR/public.der"
+openssl rsa -in "$JWT_WORK_DIR/$PRIVATE_PEM" -pubout -outform DER \
+    -out "$PRIVATE_PUBLIC_DER" 2>/dev/null || {
+        echo "A chave privada JWT não é uma chave RSA válida." >&2
+        exit 1
+    }
+openssl rsa -pubin -in "$JWT_WORK_DIR/$PUBLIC_PEM" -pubout -outform DER \
+    -out "$PUBLIC_DER" 2>/dev/null || {
+        echo "A chave pública JWT não é uma chave RSA válida." >&2
+        exit 1
+    }
+if ! cmp -s "$PRIVATE_PUBLIC_DER" "$PUBLIC_DER"; then
+    echo "JWT_PRIVATE_KEY_B64 e JWT_PUBLIC_KEY_B64 não formam o mesmo par RSA." >&2
     exit 1
 fi
 
