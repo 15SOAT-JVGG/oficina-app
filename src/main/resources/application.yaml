@@ -25,9 +25,9 @@ quarkus:
     username: ${POSTGRES_USERNAME:admin}
     password: ${POSTGRES_PASSWORD:changeme}
     jdbc:
-      url: jdbc:postgresql://${INFRA_HOST_POSTGRES:localhost}/${POSTGRES_DB:oficina}?currentSchema=oficina_mecanica&sslmode=${POSTGRES_SSLMODE:disable}
+      url: jdbc:postgresql://${INFRA_HOST_POSTGRES:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:oficina}?currentSchema=oficina_mecanica&sslmode=${POSTGRES_SSLMODE:disable}
     reactive:
-      url: postgresql://${INFRA_HOST_POSTGRES:localhost}/${POSTGRES_DB:oficina}?search_path=oficina_mecanica&sslmode=${POSTGRES_SSLMODE:disable}
+      url: postgresql://${INFRA_HOST_POSTGRES:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:oficina}?search_path=oficina_mecanica&sslmode=${POSTGRES_SSLMODE:disable}
       # Acompanha POSTGRES_SSLMODE: sem isto o cliente reativo valida a cadeia do
       # certificado e o handshake com o RDS falha, porque a CA da AWS não está no
       # truststore da JVM. Equipara o comportamento ao do JDBC, cujo `sslmode=require`

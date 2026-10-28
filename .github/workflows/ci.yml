@@ -29,7 +29,7 @@ on:
         default: false
 
   pull_request:
-    branches: [main]
+    branches: [main, homolog, production]
     types: [opened, synchronize]
     paths-ignore:
       - "**/*.md"

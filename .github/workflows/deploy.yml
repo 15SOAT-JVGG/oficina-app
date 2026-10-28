@@ -47,7 +47,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   ECR_REPOSITORY_NAME: oficina-app
 
 jobs:
@@ -79,12 +79,6 @@ jobs:
             echo "A entrega só vale para as branches homolog e production; recebeu '$ENVIRONMENT'." >&2
             exit 1
           fi
-          # O overlay de produção nasce com um marcador no lugar do host do banco, que só
-          # existe depois do apply do oficina-infra-db naquele ambiente.
-          if grep -q 'PREENCHER' "k8s/overlays/$ENVIRONMENT/configmap-patch.yaml"; then
-            echo "k8s/overlays/$ENVIRONMENT/configmap-patch.yaml ainda tem valor PREENCHER." >&2
-            exit 1
-          fi
 
       - name: Instala o Java 21
         uses: actions/setup-java@v5
@@ -96,6 +90,60 @@ jobs:
       - name: Build, testes e gates de qualidade
         run: ./mvnw --batch-mode verify
 
+  # Resolve apenas saídas não secretas dos states existentes. O state fica no runner e
+  # nunca é enviado a artifacts, summaries ou outputs do workflow.
+  resolve_config:
+    name: Resolve configuração (${{ github.ref_name }})
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    outputs:
+      account_id: ${{ steps.outputs.outputs.account_id }}
+      cluster_name: ${{ steps.outputs.outputs.cluster_name }}
+      db_address: ${{ steps.outputs.outputs.db_address }}
+      db_port: ${{ steps.outputs.outputs.db_port }}
+      db_name: ${{ steps.outputs.outputs.db_name }}
+      gateway_url: ${{ steps.outputs.outputs.gateway_url }}
+      jwt_issuer: ${{ steps.outputs.outputs.jwt_issuer }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      ENVIRONMENT: ${{ github.ref_name }}
+      JWT_ISSUER: ${{ vars.JWT_ISSUER || 'oficina-api' }}
+    steps:
+      - name: Confere credenciais e bucket
+        run: |
+          [[ -n "$TF_STATE_BUCKET" ]] || { echo "Variable TF_STATE_BUCKET ausente." >&2; exit 1; }
+          aws sts get-caller-identity >/dev/null
+
+      - name: Resolve outputs Terraform
+        id: outputs
+        run: |
+          state_dir="$(mktemp -d)"
+          trap 'rm -rf "$state_dir"' EXIT
+          aws s3 cp "s3://$TF_STATE_BUCKET/oficina-infra-db/$ENVIRONMENT/terraform.tfstate" "$state_dir/db.tfstate" --only-show-errors
+          aws s3 cp "s3://$TF_STATE_BUCKET/oficina-infra-k8s/terraform.tfstate" "$state_dir/k8s.tfstate" --only-show-errors
+          read_output() {
+            local state="$1" name="$2" value
+            value="$(jq -er --arg name "$name" '.outputs[$name].value | select(. != null and . != "")' "$state")" || {
+              echo "Output Terraform '$name' ausente no state esperado." >&2
+              exit 1
+            }
+            printf '%s' "$value"
+          }
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          cluster_name="$(read_output "$state_dir/k8s.tfstate" cluster_name)"
+          db_address="$(read_output "$state_dir/db.tfstate" db_address)"
+          db_port="$(read_output "$state_dir/db.tfstate" db_port)"
+          db_name="$(read_output "$state_dir/db.tfstate" db_name)"
+          gateway_url="$(jq -er --arg env "$ENVIRONMENT" '.outputs.api_gateway_urls.value[$env]' "$state_dir/k8s.tfstate")"
+          for pair in account_id cluster_name db_address db_port db_name gateway_url; do
+            printf '%s=%s\n' "$pair" "${!pair}" >> "$GITHUB_OUTPUT"
+          done
+          printf 'jwt_issuer=%s\n' "$JWT_ISSUER" >> "$GITHUB_OUTPUT"
+
   # ── 2. Imagem no registry, identificada pelo commit ──────────────────────────
   #
   # É o único job que usa credencial da AWS, e por isso está separado do deploy: a sessão
@@ -106,6 +154,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: ${{ github.ref_name }}
     outputs:
       repository_url: ${{ steps.registry.outputs.repository_url }}
     env:
@@ -150,10 +199,12 @@ jobs:
   # `environment` é o que faz `secrets.*` resolver para os valores do ambiente da branch.
   deploy:
     name: Deploy no cluster (${{ github.ref_name }})
-    needs: [image]
+    needs: [image, resolve_config]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ github.ref_name }}
+    outputs:
+      upstream_url: ${{ steps.upstream.outputs.url }}
     env:
       NAMESPACE: ${{ github.ref_name }}
       # Acompanha o `kubernetes_version` do cluster em oficina-infra-k8s/variables.tf.
@@ -161,6 +212,11 @@ jobs:
       KUSTOMIZE_VERSION: "5.7.1"
       IMAGE_TAG: ${{ github.sha }}
       ECR_REPOSITORY_URL: ${{ needs.image.outputs.repository_url }}
+      INFRA_HOST_POSTGRES: ${{ needs.resolve_config.outputs.db_address }}
+      POSTGRES_PORT: ${{ needs.resolve_config.outputs.db_port }}
+      POSTGRES_DB: ${{ needs.resolve_config.outputs.db_name }}
+      APP_PUBLIC_BASE_URL: ${{ needs.resolve_config.outputs.gateway_url }}
+      JWT_ISSUER: ${{ needs.resolve_config.outputs.jwt_issuer }}
     steps:
       - uses: actions/checkout@v4
 
@@ -220,6 +276,14 @@ jobs:
       # significar a mesma coisa que a primeira.
       - name: Aplica os manifestos
         run: |
+          infra/scripts/render-deploy-configmap.sh > k8s/overlays/$NAMESPACE/configmap-patch.yaml
+          overlay="$GITHUB_WORKSPACE/k8s/overlays/$NAMESPACE"
+          trap 'rm -f "$overlay/configmap-patch.yaml"; git checkout -- "$overlay/kustomization.yaml"' EXIT
+          cat >> k8s/overlays/$NAMESPACE/kustomization.yaml <<'KUSTOMIZATION'
+          patches:
+            - path: configmap-patch.yaml
+          KUSTOMIZATION
+          cd "$overlay"
           deployed_image="$(kubectl get deploy/oficina-mecanica --namespace "$NAMESPACE" \
             -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
           kustomize edit set image "oficina-mecanica=$ECR_REPOSITORY_URL:$IMAGE_TAG"
@@ -228,23 +292,93 @@ jobs:
             echo "O cluster já roda esta imagem; reiniciando para os pods lerem os segredos atuais."
             kubectl rollout restart deploy/oficina-mecanica --namespace "$NAMESPACE"
           fi
-        working-directory: k8s/overlays/${{ github.ref_name }}
 
       # Só depois disto a entrega pode ser declarada boa: o pod novo passou pelas probes,
       # o que inclui migrar o banco e conectar no RDS.
       - name: Aguarda o rollout
         run: kubectl rollout status deploy/oficina-mecanica --namespace "$NAMESPACE" --timeout=10m
 
-      - name: Smoke test do ambiente
-        env:
-          APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
-        run: infra/scripts/smoke-test.sh
+      - name: Descobre o ELB após readiness
+        id: upstream
+        run: |
+          hostname="$(kubectl get svc oficina-mecanica --namespace "$NAMESPACE" \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+          [[ -n "$hostname" ]] || { echo "Service sem hostname de ELB após readiness." >&2; exit 1; }
+          echo "url=http://$hostname" >> "$GITHUB_OUTPUT"
 
-      # Rollout que não converge e smoke test vermelho quase sempre se explicam pelo
-      # estado dos pods. Colher isto aqui evita uma sessão de kubectl à mão depois.
       - name: Diagnóstico da falha
         if: failure()
         run: |
           kubectl get pods --namespace "$NAMESPACE" -o wide || true
           kubectl describe deploy/oficina-mecanica --namespace "$NAMESPACE" || true
           kubectl logs --namespace "$NAMESPACE" -l app.kubernetes.io/name=oficina-mecanica --tail=100 --all-containers || true
+
+  publish_upstream:
+    name: Publica contrato upstream
+    needs: [deploy, resolve_config]
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      UPSTREAM_URL: ${{ needs.deploy.outputs.upstream_url }}
+      ACCOUNT_ID: ${{ needs.resolve_config.outputs.account_id }}
+      CLUSTER_NAME: ${{ needs.resolve_config.outputs.cluster_name }}
+      ENVIRONMENT: ${{ github.ref_name }}
+    steps:
+      - name: Publica contrato versionado sem segredos
+        run: |
+          [[ -n "$UPSTREAM_URL" && -n "$TF_STATE_BUCKET" ]] || { echo "URL upstream ou TF_STATE_BUCKET ausente." >&2; exit 1; }
+          contract="$(jq -n \
+            --arg account_id "$ACCOUNT_ID" --arg region "$AWS_REGION" \
+            --arg environment "$ENVIRONMENT" --arg cluster_name "$CLUSTER_NAME" \
+            --arg upstream_url "$UPSTREAM_URL" --arg source_sha "$GITHUB_SHA" \
+            '{contract_version:1,account_id:$account_id,region:$region,environment:$environment,cluster_name:$cluster_name,upstream_url:$upstream_url,source_sha:$source_sha}')"
+          printf '%s\n' "$contract" > "$RUNNER_TEMP/upstream.json"
+          aws s3 cp "$RUNNER_TEMP/upstream.json" \
+            "s3://$TF_STATE_BUCKET/oficina/config/v1/$ENVIRONMENT/upstream.json" --content-type application/json --only-show-errors
+
+  reconcile_gateway:
+    name: Reconcilia API Gateway (${{ github.ref_name }})
+    needs: [publish_upstream]
+    uses: 15SOAT-JVGG/oficina-infra-k8s/.github/workflows/reconcile.yml@9204dc7c8f53b818782654220804ca1d5f0df38d
+    with:
+      environment: ${{ github.ref_name }}
+      source_kind: app
+      source_sha: ${{ github.sha }}
+      infra_ref: 9204dc7c8f53b818782654220804ca1d5f0df38d
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      tf_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+
+  smoke_test:
+    name: Smoke test via API Gateway (${{ github.ref_name }})
+    needs: [deploy, resolve_config, reconcile_gateway]
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    env:
+      APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+      APP_PUBLIC_BASE_URL: ${{ needs.resolve_config.outputs.gateway_url }}
+      UPSTREAM_URL: ${{ needs.deploy.outputs.upstream_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Smoke test pelo Gateway
+        run: infra/scripts/smoke-test.sh "$APP_PUBLIC_BASE_URL"
+
+      - name: Confere ELB diretamente para diagnóstico
+        env:
+          APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+          APP_SEED_ADMIN_USERNAME: ${{ vars.APP_SEED_ADMIN_USERNAME || 'admin' }}
+        if: always()
+        run: |
+          payload="$(jq -nc --arg username "$APP_SEED_ADMIN_USERNAME" --arg password "$APP_SEED_ADMIN_PASSWORD" '{username:$username,password:$password}')"
+          status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' \
+            --request POST --header 'Content-Type: application/json' --data "$payload" \
+            "$UPSTREAM_URL/v1/auth/login")"
+          [[ "$status" == "200" ]] || { echo "Login direto no ELB devolveu $status." >&2; exit 1; }
