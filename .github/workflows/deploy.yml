@@ -188,7 +188,7 @@ jobs:
       - name: Constrói e publica a imagem
         env:
           ECR_REPOSITORY_URL: ${{ steps.registry.outputs.repository_url }}
-        run: infra/scripts/publish-image.sh "$GITHUB_SHA"
+        run: bash infra/scripts/publish-image.sh "$GITHUB_SHA"
 
   # ── 3. Entrega no cluster ────────────────────────────────────────────────────
   #
@@ -276,7 +276,7 @@ jobs:
       # significar a mesma coisa que a primeira.
       - name: Aplica os manifestos
         run: |
-          infra/scripts/render-deploy-configmap.sh > k8s/overlays/$NAMESPACE/configmap-patch.yaml
+          bash infra/scripts/render-deploy-configmap.sh > k8s/overlays/$NAMESPACE/configmap-patch.yaml
           overlay="$GITHUB_WORKSPACE/k8s/overlays/$NAMESPACE"
           trap 'rm -f "$overlay/configmap-patch.yaml"; git checkout -- "$overlay/kustomization.yaml"' EXIT
           cat >> k8s/overlays/$NAMESPACE/kustomization.yaml <<'KUSTOMIZATION'
@@ -369,7 +369,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Smoke test pelo Gateway
-        run: infra/scripts/smoke-test.sh "$APP_PUBLIC_BASE_URL"
+        run: bash infra/scripts/smoke-test.sh "$APP_PUBLIC_BASE_URL"
 
       - name: Confere ELB diretamente para diagnóstico
         env:
