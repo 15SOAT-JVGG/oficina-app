@@ -343,12 +343,12 @@ jobs:
   reconcile_gateway:
     name: Reconcilia API Gateway (${{ github.ref_name }})
     needs: [publish_upstream]
-    uses: 15SOAT-JVGG/oficina-infra-k8s/.github/workflows/reconcile.yml@a5b64a6097f665a4d608879e6b6b6df47465c313
+    uses: 15SOAT-JVGG/oficina-infra-k8s/.github/workflows/reconcile.yml@b622ba96628fbec5508f3195debf357f139c58c0
     with:
       environment: ${{ github.ref_name }}
       source_kind: app
       source_sha: ${{ github.sha }}
-      infra_ref: a5b64a6097f665a4d608879e6b6b6df47465c313
+      infra_ref: b622ba96628fbec5508f3195debf357f139c58c0
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       tf_state_bucket: ${{ vars.TF_STATE_BUCKET }}
     secrets:
