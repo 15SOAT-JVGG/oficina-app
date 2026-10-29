@@ -106,9 +106,9 @@ jobs:
       gateway_url: ${{ steps.outputs.outputs.gateway_url }}
       jwt_issuer: ${{ steps.outputs.outputs.jwt_issuer }}
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_ACCESS_KEY_ID || github.ref_name == 'production' && secrets.AWS_ACCESS_KEY_ID || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SECRET_ACCESS_KEY || github.ref_name == 'production' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+      AWS_SESSION_TOKEN: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SESSION_TOKEN || github.ref_name == 'production' && secrets.AWS_SESSION_TOKEN || '' }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       ENVIRONMENT: ${{ github.ref_name }}
       JWT_ISSUER: ${{ vars.JWT_ISSUER || 'oficina-api' }}
@@ -158,9 +158,9 @@ jobs:
     outputs:
       repository_url: ${{ steps.registry.outputs.repository_url }}
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_ACCESS_KEY_ID || github.ref_name == 'production' && secrets.AWS_ACCESS_KEY_ID || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SECRET_ACCESS_KEY || github.ref_name == 'production' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+      AWS_SESSION_TOKEN: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SESSION_TOKEN || github.ref_name == 'production' && secrets.AWS_SESSION_TOKEN || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -319,9 +319,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name }}
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_ACCESS_KEY_ID || github.ref_name == 'production' && secrets.AWS_ACCESS_KEY_ID || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SECRET_ACCESS_KEY || github.ref_name == 'production' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+      AWS_SESSION_TOKEN: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SESSION_TOKEN || github.ref_name == 'production' && secrets.AWS_SESSION_TOKEN || '' }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       UPSTREAM_URL: ${{ needs.deploy.outputs.upstream_url }}
       ACCOUNT_ID: ${{ needs.resolve_config.outputs.account_id }}
@@ -353,9 +353,12 @@ jobs:
       tf_state_bucket: ${{ vars.TF_STATE_BUCKET }}
       jwt_issuer: ${{ vars.JWT_ISSUER || 'oficina-api' }}
     secrets:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ github.ref_name == 'production' && secrets.AWS_ACCESS_KEY_ID || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.ref_name == 'production' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+      AWS_SESSION_TOKEN: ${{ github.ref_name == 'production' && secrets.AWS_SESSION_TOKEN || '' }}
+      HOMOLOG_AWS_ACCESS_KEY_ID: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_ACCESS_KEY_ID || '' }}
+      HOMOLOG_AWS_SECRET_ACCESS_KEY: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SECRET_ACCESS_KEY || '' }}
+      HOMOLOG_AWS_SESSION_TOKEN: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SESSION_TOKEN || '' }}
       AUTHORIZER_TEST_CUSTOMER_CPF: ${{ secrets.AUTHORIZER_TEST_CUSTOMER_CPF }}
 
   smoke_test:
