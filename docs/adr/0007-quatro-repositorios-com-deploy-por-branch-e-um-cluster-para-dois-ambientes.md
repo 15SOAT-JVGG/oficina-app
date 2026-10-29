@@ -43,5 +43,5 @@ Na conta atual do lab, o cluster e o grupo de nós usam a `LabRole` — ver o qu
 [ADR-0001](0001-eks-provisionado-com-roles-do-lab-na-vpc-default.md), que previa as roles dedicadas
 de EKS. A VPC default segue sendo reaproveitada, com as subnets públicas, sem NAT Gateway.
 
-As credenciais do lab são secrets da organização e precisam ser regravadas a cada sessão (cerca de
-quatro horas). Um deploy vermelho logo após o lab reiniciar quase sempre é isso.
+As credenciais do lab são secrets dos Environments e precisam ser regravadas para cada ambiente a
+cada sessão (cerca de quatro horas). Um deploy vermelho logo após o lab reiniciar quase sempre é isso.

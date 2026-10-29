@@ -4,9 +4,8 @@
 # migrations: se este script passa, o ambiente está de pé.
 #
 # O que ele verifica, e nada além disso:
-#   1. a aplicação reporta estar pronta (/q/health/ready)
-#   2. o login com o usuário de seed devolve um JWT
-#   3. uma ordem de serviço é criada e aparece na listagem em seguida
+#   1. o login público funciona depois que o pod ficou Ready no cluster
+#   2. uma ordem de serviço é criada e aparece na listagem em seguida
 #
 # Regra de negócio não se verifica aqui — WorkOrderControllerIT e SecurityIT já cobrem
 # ciclo de vida da OS, orçamento, estoque e RBAC contra um Postgres real. Uma falha
@@ -83,19 +82,24 @@ extract() {
 # para rodar antes de ficar pronto. Esperar aqui é o que separa "ambiente quebrado" de
 # "ambiente ainda subindo".
 wait_until_ready() {
-    local deadline=$((SECONDS + READY_TIMEOUT_SECONDS)) status
+    local deadline=$((SECONDS + READY_TIMEOUT_SECONDS)) status payload
+    payload="$(login_payload)"
     while :; do
         status="$(curl --silent --max-time "$REQUEST_TIMEOUT_SECONDS" \
+            --request POST \
+            --header 'Accept: application/json' \
+            --header 'Content-Type: application/json' \
             --output "$RESPONSE_BODY_FILE" --write-out '%{http_code}' \
-            "$BASE_URL/q/health/ready")" || status="sem resposta"
+            --data "$payload" \
+            "$BASE_URL/v1/auth/login")" || status="sem resposta"
         if [[ "$status" == "200" ]]; then
             RESPONSE_BODY="$(cat "$RESPONSE_BODY_FILE")"
-            [[ "$(jq -r '.status' <<<"$RESPONSE_BODY")" == "UP" ]] \
-                || fail "readiness respondeu 200 sem status UP: $RESPONSE_BODY"
+            TOKEN="$(extract '.token')"
             return
         fi
+        [[ "$status" != "401" ]] || fail "login de seed recusado; confira usuário e senha configurados."
         ((SECONDS < deadline)) \
-            || fail "a aplicação não ficou pronta em ${READY_TIMEOUT_SECONDS}s (último: $status)"
+            || fail "o login não ficou disponível em ${READY_TIMEOUT_SECONDS}s (último: $status)"
         sleep "$READY_RETRY_SECONDS"
     done
 }
@@ -159,10 +163,7 @@ find_created_work_order() {
 echo "Smoke test contra $BASE_URL"
 
 wait_until_ready
-echo "1/4 aplicação pronta"
-
-request POST /v1/auth/login 200 "$(login_payload)"
-TOKEN="$(extract '.token')"
+echo "1/4 API e banco prontos"
 echo "2/4 autenticado como $ADMIN_USERNAME"
 
 DOCUMENT="$(generate_document)"

@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: oficina-mecanica-config
-data:
-  # PREENCHER: o RDS de produção ainda não foi criado. Depois do apply da branch
-  # `production` do oficina-infra-db, use o output `db_address` daquele state. O deploy
-  # recusa este valor enquanto ele contiver PREENCHER.
-  INFRA_HOST_POSTGRES: PREENCHER-apos-o-apply-do-oficina-infra-db-em-production
