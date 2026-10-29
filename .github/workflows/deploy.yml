@@ -265,7 +265,7 @@ jobs:
           JWT_PUBLIC_KEY_B64: ${{ secrets.JWT_PUBLIC_KEY_B64 }}
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
-        run: infra/scripts/create-app-credentials.sh
+        run: bash infra/scripts/create-app-credentials.sh
 
       # A tag do commit é o que faz do apply um rollout de verdade: com `latest`, o objeto
       # no cluster não muda e o Kubernetes não substitui pod algum.
