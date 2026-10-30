@@ -291,6 +291,11 @@ jobs:
           deployed_image="$(kubectl get deploy/oficina-mecanica --namespace "$NAMESPACE" \
             -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
           kustomize edit set image "oficina-mecanica=$ECR_REPOSITORY_URL:$IMAGE_TAG"
+          if kubectl api-versions | grep -Fxq 'monitoring.coreos.com/v1'; then
+            kustomize edit add resource ../../base/servicemonitor.yaml
+          else
+            echo "CRD ServiceMonitor ausente; adiando a métrica do Prometheus até o stack ser instalado."
+          fi
           kubectl apply -k .
           if [[ "$deployed_image" == "$ECR_REPOSITORY_URL:$IMAGE_TAG" ]]; then
             echo "O cluster já roda esta imagem; reiniciando para os pods lerem os segredos atuais."
