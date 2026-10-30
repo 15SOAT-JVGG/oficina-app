@@ -1,0 +1,80 @@
+name: Seed Authorizer test customer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    environment: homolog
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.HOMOLOG_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.HOMOLOG_AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.HOMOLOG_AWS_SESSION_TOKEN }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      APP_SEED_ADMIN_USERNAME: ${{ vars.APP_SEED_ADMIN_USERNAME || 'admin' }}
+      APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+      AUTHORIZER_TEST_CUSTOMER_CPF: ${{ secrets.AUTHORIZER_TEST_CUSTOMER_CPF }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or activate the synthetic customer fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$AWS_ACCESS_KEY_ID" && -n "$AWS_SECRET_ACCESS_KEY" && -n "$AWS_SESSION_TOKEN" ]]
+          [[ -n "$TF_STATE_BUCKET" && -n "$APP_SEED_ADMIN_PASSWORD" ]]
+          [[ "$AUTHORIZER_TEST_CUSTOMER_CPF" =~ ^[0-9]{11}$ ]]
+
+          state_file="$RUNNER_TEMP/k8s.tfstate"
+          response_file="$RUNNER_TEMP/response.json"
+          trap 'rm -f "$state_file" "$response_file"' EXIT
+          aws s3 cp "s3://$TF_STATE_BUCKET/oficina-infra-k8s/terraform.tfstate" "$state_file" --only-show-errors
+          gateway_url="$(jq -er '.outputs.api_gateway_urls.value.homolog | select(type == "string" and length > 0)' "$state_file")"
+          [[ "$gateway_url" =~ ^https://[^/]+$ ]]
+
+          login_payload="$(jq -cn --arg username "$APP_SEED_ADMIN_USERNAME" --arg password "$APP_SEED_ADMIN_PASSWORD" '{username:$username,password:$password}')"
+          status="$(curl --silent --show-error --max-time 30 --output "$response_file" --write-out '%{http_code}' \
+            --header 'Content-Type: application/json' --data "$login_payload" "$gateway_url/v1/auth/login")"
+          [[ "$status" == 200 ]] || { echo "Admin login failed with HTTP $status." >&2; exit 1; }
+          admin_token="$(jq -er '.token | strings | select(length > 0)' "$response_file")"
+
+          status="$(curl --silent --show-error --max-time 30 --output "$response_file" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $admin_token" \
+            "$gateway_url/v1/customer/by-document/$AUTHORIZER_TEST_CUSTOMER_CPF")"
+          if [[ "$status" == 404 ]]; then
+            payload="$(jq -cn --arg cpf "$AUTHORIZER_TEST_CUSTOMER_CPF" '{
+              firstName:"Authorizer", lastName:"Smoke Fixture",
+              email:"authorizer.smoke+\($cpf)@example.com",
+              phoneNumber:"+5511999887766", document:$cpf
+            }')"
+            status="$(curl --silent --show-error --max-time 30 --output "$response_file" --write-out '%{http_code}' \
+              --request POST --header "Authorization: Bearer $admin_token" \
+              --header 'Content-Type: application/json' --data "$payload" "$gateway_url/v1/customer")"
+            [[ "$status" == 201 ]] || { echo "Customer fixture creation failed with HTTP $status." >&2; exit 1; }
+            status=200
+          elif [[ "$status" == 200 ]]; then
+            active="$(jq -r '.active' "$response_file")"
+            if [[ "$active" != true ]]; then
+              customer_id="$(jq -er '.customerId' "$response_file")"
+              status="$(curl --silent --show-error --max-time 30 --output "$response_file" --write-out '%{http_code}' \
+                --request PATCH --header "Authorization: Bearer $admin_token" \
+                "$gateway_url/v1/customer/$customer_id/activate")"
+              [[ "$status" == 200 ]] || { echo "Customer fixture activation failed with HTTP $status." >&2; exit 1; }
+            fi
+          else
+            echo "Customer fixture lookup failed with HTTP $status." >&2
+            exit 1
+          fi
+
+          payload="$(jq -cn --arg cpf "$AUTHORIZER_TEST_CUSTOMER_CPF" '{cpf:$cpf}')"
+          status="$(curl --silent --show-error --max-time 30 --output "$response_file" --write-out '%{http_code}' \
+            --header 'Content-Type: application/json' --data "$payload" "$gateway_url/v1/auth/customer")"
+          [[ "$status" == 200 ]] || { echo "Customer CPF authentication failed with HTTP $status." >&2; exit 1; }
+          echo "Synthetic Authorizer customer is active and CPF login returned HTTP 200."
