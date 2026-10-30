@@ -105,7 +105,7 @@ quarkus:
     # de management (9000); nenhuma rota de management precisa ser exposta.
     management:
       enabled: false
-    path: /q/openapi                 # spec at /q/openapi (JSON) and /q/openapi?format=yaml
+    path: /q/openapi                 # YAML por padrão; ?format=json solicita JSON.
     info-title: Mechanic Workshop API
     info-version: ${project.version}
     info-description: Mechanic workshop management API (16SOAT - Tech Challenge Phase 1)

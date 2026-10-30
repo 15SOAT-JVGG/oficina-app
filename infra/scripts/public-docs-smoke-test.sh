@@ -17,9 +17,9 @@ command -v curl >/dev/null || fail "curl não está instalado."
 command -v jq >/dev/null || fail "jq não está instalado."
 
 status="$(curl --silent --show-error --location --max-redirs 5 --max-time "$REQUEST_TIMEOUT_SECONDS" \
-    --output "$TEMP_DIR/openapi.json" --write-out '%{http_code}' "$BASE_URL/q/openapi")" \
+    --output "$TEMP_DIR/openapi.json" --write-out '%{http_code}' "$BASE_URL/q/openapi?format=json")" \
     || fail "GET /q/openapi não recebeu resposta do Gateway."
-[[ "$status" == "200" ]] || fail "GET /q/openapi devolveu HTTP $status, esperado 200."
+[[ "$status" == "200" ]] || fail "GET /q/openapi?format=json devolveu HTTP $status, esperado 200."
 jq -e '(.openapi | strings) or (.swagger | strings)' "$TEMP_DIR/openapi.json" >/dev/null \
     || fail "GET /q/openapi não devolveu um documento OpenAPI válido."
 
