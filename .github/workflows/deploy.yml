@@ -105,6 +105,8 @@ jobs:
       db_name: ${{ steps.outputs.outputs.db_name }}
       gateway_url: ${{ steps.outputs.outputs.gateway_url }}
       jwt_issuer: ${{ steps.outputs.outputs.jwt_issuer }}
+      tf_state_bucket: ${{ steps.outputs.outputs.tf_state_bucket }}
+      aws_region: ${{ steps.outputs.outputs.aws_region }}
     env:
       AWS_ACCESS_KEY_ID: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_ACCESS_KEY_ID || github.ref_name == 'production' && secrets.AWS_ACCESS_KEY_ID || '' }}
       AWS_SECRET_ACCESS_KEY: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SECRET_ACCESS_KEY || github.ref_name == 'production' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
@@ -143,6 +145,8 @@ jobs:
             printf '%s=%s\n' "$pair" "${!pair}" >> "$GITHUB_OUTPUT"
           done
           printf 'jwt_issuer=%s\n' "$JWT_ISSUER" >> "$GITHUB_OUTPUT"
+          printf 'tf_state_bucket=%s\n' "$TF_STATE_BUCKET" >> "$GITHUB_OUTPUT"
+          printf 'aws_region=%s\n' "$AWS_REGION" >> "$GITHUB_OUTPUT"
 
   # ── 2. Imagem no registry, identificada pelo commit ──────────────────────────
   #
@@ -364,15 +368,15 @@ jobs:
 
   reconcile_gateway:
     name: Reconcilia API Gateway (${{ github.ref_name }})
-    needs: [publish_upstream]
-    uses: 15SOAT-JVGG/oficina-infra-k8s/.github/workflows/reconcile.yml@261e6451b159b2e88dccf392dcbe8847dc4d2d09
+    needs: [publish_upstream, resolve_config]
+    uses: 15SOAT-JVGG/oficina-infra-k8s/.github/workflows/reconcile.yml@eeda50319c5dba46662bd55021fa2cb8419d1baa
     with:
       environment: ${{ github.ref_name }}
       source_kind: app
       source_sha: ${{ github.sha }}
-      infra_ref: 261e6451b159b2e88dccf392dcbe8847dc4d2d09
-      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
-      tf_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      infra_ref: eeda50319c5dba46662bd55021fa2cb8419d1baa
+      aws_region: ${{ needs.resolve_config.outputs.aws_region }}
+      tf_state_bucket: ${{ needs.resolve_config.outputs.tf_state_bucket }}
       jwt_issuer: ${{ vars.JWT_ISSUER || 'oficina-api' }}
     secrets:
       AWS_ACCESS_KEY_ID: ${{ github.ref_name == 'production' && secrets.AWS_ACCESS_KEY_ID || '' }}
