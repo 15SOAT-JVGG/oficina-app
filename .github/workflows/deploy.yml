@@ -85,7 +85,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: maven
 
       - name: Build, testes e gates de qualidade
         run: ./mvnw --batch-mode verify
