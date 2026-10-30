@@ -411,7 +411,28 @@ jobs:
           (umask 077 && base64 --decode <<<"$KUBE_CONFIG_B64" >"$kubeconfig")
           echo "KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
           export KUBECONFIG="$kubeconfig"
-          kubectl delete service oficina-mecanica --namespace "$NAMESPACE" --ignore-not-found
+          if ! kubectl get service oficina-mecanica --namespace "$NAMESPACE" >/dev/null 2>&1; then
+            echo "O Service legado já não existe em $NAMESPACE."
+            exit 0
+          fi
+
+          kubectl patch service oficina-mecanica --namespace "$NAMESPACE" \
+            --type merge --patch '{"spec":{"type":"ClusterIP"}}'
+
+          for attempt in $(seq 1 60); do
+            service_type="$(kubectl get service oficina-mecanica --namespace "$NAMESPACE" \
+              -o jsonpath='{.spec.type}')"
+            public_hostname="$(kubectl get service oficina-mecanica --namespace "$NAMESPACE" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+            if [[ "$service_type" == "ClusterIP" && -z "$public_hostname" ]]; then
+              echo "Service legado em ClusterIP e sem hostname público."
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "O Service mudou para ClusterIP, mas o hostname do ELB ainda aparece no status." >&2
+          exit 1
   smoke_test:
     name: Smoke test via API Gateway (${{ github.ref_name }})
     needs: [deploy, resolve_config, reconcile_gateway]
