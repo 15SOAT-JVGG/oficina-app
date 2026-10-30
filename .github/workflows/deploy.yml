@@ -374,7 +374,7 @@ jobs:
       environment: ${{ github.ref_name }}
       source_kind: app
       source_sha: ${{ github.sha }}
-      infra_ref: 1125053ceb0482d9bd256c978fa2c2b80403c104
+      infra_ref: 3bf202e1a420cd18e483060967b1e9a05bd142de
       aws_region: ${{ needs.resolve_config.outputs.aws_region }}
       tf_state_bucket: ${{ needs.resolve_config.outputs.tf_state_bucket }}
       jwt_issuer: ${{ vars.JWT_ISSUER || 'oficina-api' }}
