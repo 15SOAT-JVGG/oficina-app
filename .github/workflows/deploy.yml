@@ -188,7 +188,7 @@ jobs:
       - name: Constrói e publica a imagem
         env:
           ECR_REPOSITORY_URL: ${{ steps.registry.outputs.repository_url }}
-        run: infra/scripts/publish-image.sh "$GITHUB_SHA"
+        run: bash infra/scripts/publish-image.sh "$GITHUB_SHA"
 
   # ── 3. Entrega no cluster ────────────────────────────────────────────────────
   #
@@ -265,7 +265,7 @@ jobs:
           JWT_PUBLIC_KEY_B64: ${{ secrets.JWT_PUBLIC_KEY_B64 }}
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
-        run: infra/scripts/create-app-credentials.sh
+        run: bash infra/scripts/create-app-credentials.sh
 
       # A tag do commit é o que faz do apply um rollout de verdade: com `latest`, o objeto
       # no cluster não muda e o Kubernetes não substitui pod algum.
@@ -276,7 +276,7 @@ jobs:
       # significar a mesma coisa que a primeira.
       - name: Aplica os manifestos
         run: |
-          infra/scripts/render-deploy-configmap.sh > k8s/overlays/$NAMESPACE/configmap-patch.yaml
+          bash infra/scripts/render-deploy-configmap.sh > k8s/overlays/$NAMESPACE/configmap-patch.yaml
           overlay="$GITHUB_WORKSPACE/k8s/overlays/$NAMESPACE"
           trap 'rm -f "$overlay/configmap-patch.yaml"; git checkout -- "$overlay/kustomization.yaml"' EXIT
           cat >> k8s/overlays/$NAMESPACE/kustomization.yaml <<'KUSTOMIZATION'
@@ -343,12 +343,12 @@ jobs:
   reconcile_gateway:
     name: Reconcilia API Gateway (${{ github.ref_name }})
     needs: [publish_upstream]
-    uses: 15SOAT-JVGG/oficina-infra-k8s/.github/workflows/reconcile.yml@4a395aa3852ea366edf7ab41348c5464192fd286
+    uses: 15SOAT-JVGG/oficina-infra-k8s/.github/workflows/reconcile.yml@5fde9b837986b63699cc683b7fa0cbe465ef038c
     with:
       environment: ${{ github.ref_name }}
       source_kind: app
       source_sha: ${{ github.sha }}
-      infra_ref: 4a395aa3852ea366edf7ab41348c5464192fd286
+      infra_ref: 5fde9b837986b63699cc683b7fa0cbe465ef038c
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       tf_state_bucket: ${{ vars.TF_STATE_BUCKET }}
       jwt_issuer: ${{ vars.JWT_ISSUER || 'oficina-api' }}
@@ -374,7 +374,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Smoke test pelo Gateway
-        run: infra/scripts/smoke-test.sh "$APP_PUBLIC_BASE_URL"
+        run: bash infra/scripts/smoke-test.sh "$APP_PUBLIC_BASE_URL"
 
       - name: Confere ELB diretamente para diagnóstico
         env:

@@ -57,10 +57,13 @@ Environment correspondente do GitHub, os secrets que o deploy consome:
 | `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `db_username` e a senha do RDS do ambiente, em `oficina-infra-db` |
 | `APP_SEED_ADMIN_PASSWORD` / `APP_SEED_MECHANIC_PASSWORD` | escolhidas pelo operador; são as credenciais de acesso à API |
 | `JWT_PRIVATE_KEY_B64` / `JWT_PUBLIC_KEY_B64` | `infra/scripts/generate-jwt-pair.sh` |
+| `AUTHORIZER_TEST_CUSTOMER_CPF` | CPF sintético de cliente ativo para o smoke test Gateway em homolog; configure também no Environment `homolog` da Lambda |
 | `MAIL_USERNAME` / `MAIL_PASSWORD` | conta SMTP; opcionais, mas as duas andam juntas |
 
-As credenciais da AWS (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) são secrets da
-**organização**, regravados a cada sessão do lab; só o job que publica a imagem as usa.
+Em `homolog`, os secrets Organization `HOMOLOG_AWS_ACCESS_KEY_ID`, `HOMOLOG_AWS_SECRET_ACCESS_KEY` e
+`HOMOLOG_AWS_SESSION_TOKEN` são limitados aos quatro repositórios e renovados a cada sessão do lab.
+Production continua usando `AWS_*` no Environment. `AWS_REGION` e `TF_STATE_BUCKET` são variables da
+Organization; variables de Environment com os mesmos nomes têm precedência.
 
 Nenhum deles aparece em log: o GitHub redige valor de secret na saída, e `create-app-credentials.sh`
 monta os `Secret` por `kubectl create ... --dry-run=client -o yaml | kubectl apply -f -`, sem echo.
@@ -224,7 +227,7 @@ probes do `Deployment` declaram `timeoutSeconds: 5`.
 Reiniciar a sessão do Learner Lab cancela as credenciais; o que continua de pé depende do que o lab
 preserva. Depois de reiniciar:
 
-1. Renove as credenciais e regrave os três secrets `AWS_*` da organização.
+1. Renove as credenciais e regrave `HOMOLOG_AWS_*` da Organization para homolog e `AWS_*` do Environment de production.
 2. Gere um novo kubeconfig com `aws eks update-kubeconfig --name oficina --region us-east-1`.
 3. Confirme com `kubectl get nodes` e com o smoke test antes de concluir que algo quebrou.
 
