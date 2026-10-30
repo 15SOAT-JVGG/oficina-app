@@ -100,6 +100,11 @@ quarkus:
 
   # ── OpenAPI / Swagger UI ──────────────────────────────────────────────────--
   smallrye-openapi:
+    # Mantém o OpenAPI disponível no servidor principal (8080), que é o
+    # upstream publicado no API Gateway. Métricas e health continuam na porta
+    # de management (9000); nenhuma rota de management precisa ser exposta.
+    management:
+      enabled: false
     path: /q/openapi                 # spec at /q/openapi (JSON) and /q/openapi?format=yaml
     info-title: Mechanic Workshop API
     info-version: ${project.version}
