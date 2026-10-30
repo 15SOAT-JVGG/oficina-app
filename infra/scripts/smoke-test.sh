@@ -162,6 +162,23 @@ find_created_work_order() {
 
 echo "Smoke test contra $BASE_URL"
 
+status="$(curl --silent --show-error --location --max-redirs 5 --max-time "$REQUEST_TIMEOUT_SECONDS" \
+    --output "$RESPONSE_BODY_FILE" --write-out '%{http_code}' "$BASE_URL/q/openapi")" \
+    || fail "GET /q/openapi não recebeu resposta de $BASE_URL"
+[[ "$status" == "200" ]] \
+    || fail "GET /q/openapi devolveu $status, esperado 200"
+jq -e '(.openapi | strings) or (.swagger | strings)' "$RESPONSE_BODY_FILE" >/dev/null \
+    || fail "GET /q/openapi não devolveu um documento OpenAPI válido"
+
+status="$(curl --silent --show-error --location --max-redirs 5 --max-time "$REQUEST_TIMEOUT_SECONDS" \
+    --output "$RESPONSE_BODY_FILE" --write-out '%{http_code}' "$BASE_URL/q/swagger-ui")" \
+    || fail "GET /q/swagger-ui não recebeu resposta de $BASE_URL"
+[[ "$status" == "200" ]] \
+    || fail "GET /q/swagger-ui devolveu $status, esperado 200"
+grep -Eiq '<!doctype html|<html' "$RESPONSE_BODY_FILE" \
+    || fail "GET /q/swagger-ui não devolveu a página HTML do Swagger UI"
+echo "OpenAPI e Swagger UI públicos e sem autenticação"
+
 wait_until_ready
 echo "1/4 API e banco prontos"
 echo "2/4 autenticado como $ADMIN_USERNAME"

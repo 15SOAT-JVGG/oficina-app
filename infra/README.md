@@ -9,7 +9,7 @@ O cluster e o banco **não** nascem aqui. Cada um tem o seu repositório e a sua
 |---|---|
 | `oficina-infra-k8s` | Cluster EKS `oficina`, node group, ECR `oficina-app` e `metrics-server` |
 | `oficina-infra-db` | RDS PostgreSQL 16, um por ambiente |
-| `oficina-lambda-auth` | Lambda de autenticação por CPF |
+| `oficina-lambda-auth` | Lambda de login por CPF e Lambda Authorizer JWT |
 
 A conta é do AWS Academy (Learner Lab), e isso molda a solução: não há `iam:CreateRole`, a rede e as
 roles vêm prontas, e as credenciais da sessão expiram em cerca de quatro horas. As decisões que
@@ -34,8 +34,10 @@ cada. A `main` é só integração: nada é implantado a partir dela. O deploy a
 | `homolog` | `homolog` | `k8s/overlays/homolog` | `oficina-homolog` |
 | `production` | `production` | `k8s/overlays/production` | `oficina-production` |
 
-O overlay de `production` carrega um `PREENCHER` no host do banco até o RDS existir; o workflow
-recusa o deploy enquanto ele estiver lá.
+Os endereços do RDS e do API Gateway não ficam versionados nos overlays. O workflow lê os outputs
+dos states Terraform no bucket configurado por `TF_STATE_BUCKET` e renderiza o ConfigMap durante o
+deploy. O endereço do NLB interno é descoberto depois do rollout e seu listener é publicado como contrato upstream no
+prefixo `oficina/config/v1/<ambiente>/`.
 
 ## Habilitando um ambiente (uma vez)
 
@@ -53,16 +55,25 @@ Environment correspondente do GitHub, os secrets que o deploy consome:
 
 | Secret | De onde vem |
 |---|---|
+| `HOMOLOG_AWS_ACCESS_KEY_ID`, `HOMOLOG_AWS_SECRET_ACCESS_KEY`, `HOMOLOG_AWS_SESSION_TOKEN` | Secrets Organization com acesso restrito aos quatro repositórios; credenciais temporárias do Learner Lab para `homolog` |
 | `KUBE_CONFIG_B64` | `infra/scripts/create-deploy-kubeconfig.sh <ambiente>` |
 | `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `db_username` e a senha do RDS do ambiente, em `oficina-infra-db` |
 | `APP_SEED_ADMIN_PASSWORD` / `APP_SEED_MECHANIC_PASSWORD` | escolhidas pelo operador; são as credenciais de acesso à API |
 | `JWT_PRIVATE_KEY_B64` / `JWT_PUBLIC_KEY_B64` | `infra/scripts/generate-jwt-pair.sh` |
+| Variables `AWS_REGION` / `TF_STATE_BUCKET` | Região e bucket S3 dos states/contratos |
+| Variable `JWT_ISSUER` | Issuer compartilhado entre Lambda, Authorizer e aplicação; default `oficina-api` |
+| `AUTHORIZER_TEST_CUSTOMER_CPF` | CPF sintético de um cliente ativo usado pela matriz pós-reconciliação do Gateway; configure também no Environment `homolog` de `oficina-lambda-auth` |
 | `MAIL_USERNAME` / `MAIL_PASSWORD` | conta SMTP; opcionais, mas as duas andam juntas |
 
-As credenciais da AWS (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) são secrets da
-**organização**, regravados a cada sessão do lab; só o job que publica a imagem as usa.
+As credenciais de homolog são os secrets Organization `HOMOLOG_AWS_*`, liberados apenas para os quatro
+repositórios e renovados uma vez por sessão do Lab. Production continua usando `AWS_*` no Environment.
+Jobs separados usam as credenciais para resolver outputs, publicar imagem e contrato.
 
-Nenhum deles aparece em log: o GitHub redige valor de secret na saída, e `create-app-credentials.sh`
+O workflow reutilizável de reconciliação é fixado por SHA completo nos campos `uses:` e `infra_ref`.
+Ao publicar uma revisão nova de `oficina-infra-k8s`, atualize os dois campos nos workflows chamadores.
+
+`DB_PASSWORD` no Environment do `oficina-infra-db` e `POSTGRES_PASSWORD` no Environment da aplicação
+devem conter o mesmo valor. Nenhum segredo aparece em log: o GitHub redige valores e `create-app-credentials.sh`
 monta os `Secret` por `kubectl create ... --dry-run=client -o yaml | kubectl apply -f -`, sem echo.
 
 O token da `ServiceAccount` é de longa duração e concede acesso ao namespace. Se vazar, não expira
@@ -71,22 +82,25 @@ sozinho: `kubectl delete serviceaccount github-deployer -n <ambiente>` e gere ou
 ## Pelo caminho de entrega
 
 O workflow **Deploy** (`.github/workflows/deploy.yml`) roda no push em `homolog` ou `production`.
-São três jobs encadeados, e a etapa que falha interrompe a entrega — teste vermelho não gera imagem, e
-imagem que não publicou não chega ao cluster.
+Valida o código, publica a imagem, resolve outputs, faz o deploy, publica o upstream e chama a
+reconciliação do Gateway antes do smoke test.
 
 | Job | O que faz | Credencial |
 |---|---|---|
-| Build & Tests | Confere o ambiente e roda `./mvnw verify`: build, testes, qualidade estática e cobertura | nenhuma |
-| Imagem no ECR | Publica a imagem com a tag do SHA do commit | sessão do lab |
-| Deploy no cluster | Entrega os `Secret`, aplica o overlay com a tag do commit, aguarda o rollout e roda o smoke test | token da `ServiceAccount` |
+| Build & Tests | Roda `./mvnw verify`: build, testes, qualidade estática e cobertura | nenhuma |
+| Resolve configuração | Lê outputs não sensíveis dos states do RDS e do Gateway | AWS do Environment |
+| Imagem no ECR | Publica a imagem com a tag do SHA do commit | AWS do Environment |
+| Deploy no cluster | Entrega `Secret`, injeta configuração dinâmica, aplica o overlay e aguarda readiness | token da `ServiceAccount` |
+| Contrato e Gateway | Publica o upstream no S3 e reconcilia as rotas no state existente | AWS do Environment |
+| Smoke test | Exercita API pela URL do Gateway; valida ELB direto como diagnóstico | segredo de seed |
 
 A tag da imagem é o SHA do commit, e é ela que faz do `kubectl apply` um rollout de verdade: com
 `latest`, o objeto no cluster não mudaria e nenhum pod seria substituído. Por isso o job troca a tag
 com `kustomize edit set image` antes de aplicar.
 
 As migrations não têm passo próprio. `flyway.migrate-at-start` as aplica na inicialização, então quem
-as espera é o `kubectl rollout status`: um pod só fica pronto depois de migrar o banco. E o último
-passo é o smoke test.
+as espera é o `kubectl rollout status`: um pod só fica pronto depois de migrar o banco. O smoke test
+passa pelo Gateway já reconciliado.
 
 **O acesso ao cluster não usa credencial da AWS** ([ADR-0002](../docs/adr/0002-deploy-no-cluster-via-kubeconfig-de-serviceaccount.md)).
 A sessão do lab expira, e o deploy ficaria vermelho por motivo alheio ao código.
@@ -125,12 +139,21 @@ Reentregar o mesmo commit (depois de trocar um segredo, por exemplo) não muda o
 pods continuariam com os segredos antigos: nesse caso rode também
 `kubectl rollout restart deploy/oficina-mecanica -n homolog`. O workflow faz isso sozinho.
 
-O endereço público sai do `Service`; o ELB leva cerca de um minuto para começar a responder:
+Use a URL HTTPS do API Gateway como entrada pública; o Service da aplicação é interno:
 
 ```bash
-ELB="$(kubectl get svc oficina-mecanica -n homolog -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
-curl "http://$ELB/q/health/ready"
+GATEWAY='https://<api-gateway-homolog>'
+curl --request POST --header 'Content-Type: application/json' \
+  --data '{"username":"admin","password":"<senha do seed>"}' \
+  "$GATEWAY/v1/auth/login"
 ```
+
+Readiness/liveness e `/q/metrics` ficam na interface de gerenciamento, porta 9000. Ela tem um
+`Service` `ClusterIP` próprio e não é publicada no ELB; as probes do kubelet verificam a prontidão
+diretamente no pod. Para consulta manual, use `kubectl port-forward svc/oficina-mecanica-management
+-n homolog 9000:9000`. O `ClusterIP` impede acesso pela Internet, mas a restrição entre pods exige
+NetworkPolicy com enforcement confirmado no VPC CNI do EKS; sem isso, outros pods da VPC do cluster
+podem alcançar a porta de gerenciamento.
 
 Os dois `Secret` não estão em `k8s/` de propósito — senha do banco, credenciais de seed e chave
 privada não entram no repositório. `create-app-credentials.sh` os monta a partir das variáveis acima e
@@ -152,6 +175,10 @@ NAMESPACE=homolog infra/scripts/smoke-test.sh       # ou: infra/scripts/smoke-te
 Regra de negócio ele não verifica — isso é o que os `*IT` da aplicação já fazem contra um Postgres
 real, e por isso uma falha aqui aponta para infraestrutura. Requer `curl` e `jq`, mais `kubectl`
 quando o endereço não é informado.
+
+Após a reconciliação do Gateway, o workflow reutilizável testa health público, login de cliente por CPF,
+token ausente, malformado e alterado, acesso CUSTOMER e recusa RBAC de CUSTOMER na fila operacional.
+O summary guarda somente o nome do cenário, status HTTP e request ID.
 
 Duas coisas que só aparecem contra o RDS e valem lembrar:
 
@@ -224,7 +251,7 @@ probes do `Deployment` declaram `timeoutSeconds: 5`.
 Reiniciar a sessão do Learner Lab cancela as credenciais; o que continua de pé depende do que o lab
 preserva. Depois de reiniciar:
 
-1. Renove as credenciais e regrave os três secrets `AWS_*` da organização.
+1. Renove as credenciais e regrave os três secrets `AWS_*` nos Environments usados pelas pipelines.
 2. Gere um novo kubeconfig com `aws eks update-kubeconfig --name oficina --region us-east-1`.
 3. Confirme com `kubectl get nodes` e com o smoke test antes de concluir que algo quebrou.
 

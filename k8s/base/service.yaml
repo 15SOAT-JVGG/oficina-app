@@ -3,6 +3,8 @@ kind: Service
 metadata:
   name: oficina-mecanica
 spec:
+  # Legacy: saiu do kustomization. O workflow remove o recurso existente somente depois
+  # que o API Gateway estiver roteando pelo NLB interno. Mantido para rollback explícito.
   # LoadBalancer usa o provisionador que o próprio EKS já roda, que cria um ELB
   # clássico sem instalar controller nenhum. Ingress com o AWS Load Balancer
   # Controller dependeria de IRSA e de política IAM, indisponíveis no Learner Lab.

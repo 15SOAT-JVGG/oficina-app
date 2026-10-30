@@ -119,7 +119,7 @@ curl -s http://localhost:8080/v1/customer -H "Authorization: Bearer $TOKEN"
 
 ### 3. Pelo Swagger UI
 
-Abra `http://localhost:8080/q/swagger-ui` → **Authorize** (esquema `bearerAuth`) → cole **apenas o
+Abra `http://localhost:9000/q/swagger-ui` → **Authorize** (esquema `bearerAuth`) → cole **apenas o
 token** (sem `Bearer`) → as chamadas passam a enviar o header automaticamente.
 
 > Sem senha definida no `.env`? Recupere a gerada no log:
@@ -235,8 +235,8 @@ Base local: `http://localhost:8080`. No cluster, o hostname do ELB. Papéis: �
 ### Operação — `/q`
 | Método | Path | Acesso |
 |---|---|---|
-| GET | `/q/health/live` · `/q/health/ready` · `/q/health/started` | 🔓 |
-| GET | `/q/openapi` · `/q/swagger-ui` | 🔓 |
+| GET | `/q/health/live` · `/q/health/ready` · `/q/health/started` | Interface interna de gerenciamento na porta 9000 |
+| GET | `/q/openapi` · `/q/swagger-ui` | Interface interna de gerenciamento na porta 9000 |
 
 A collection que exercita todos eles em ordem está em [postman/](../postman/README.md).
 
