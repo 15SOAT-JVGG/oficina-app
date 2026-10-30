@@ -166,5 +166,5 @@ jobs:
           for environment in homolog production; do
             echo "== $environment"
             docker run --rm -i ghcr.io/yannh/kubeconform:v0.8.0 \
-              -strict -skip ServiceMonitor -summary -kubernetes-version "$KUBERNETES_VERSION" - < "rendered-$environment.yaml"
+              -strict -summary -kubernetes-version "$KUBERNETES_VERSION" - < "rendered-$environment.yaml"
           done
