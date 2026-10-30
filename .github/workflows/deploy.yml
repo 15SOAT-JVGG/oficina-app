@@ -410,6 +410,7 @@ jobs:
           kubeconfig="$RUNNER_TEMP/kubeconfig"
           (umask 077 && base64 --decode <<<"$KUBE_CONFIG_B64" >"$kubeconfig")
           echo "KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
+          export KUBECONFIG="$kubeconfig"
           kubectl delete service oficina-mecanica --namespace "$NAMESPACE" --ignore-not-found
   smoke_test:
     name: Smoke test via API Gateway (${{ github.ref_name }})
