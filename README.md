@@ -127,8 +127,11 @@ flowchart TB
     subgraph aws["AWS · Learner Lab · us-east-1"]
         ecr["ECR · oficina-app<br/>imagem com tag = SHA do commit"]
 
-        subgraph vpc["VPC default"]
-            elb["ELB clássico<br/>Service type=LoadBalancer"]
+    gateway["API Gateway HTTPS<br/>Lambda Authorizer · VPC Link"]
+
+    subgraph vpc["VPC default"]
+            appnlb["NLB interno<br/>Service oficina-mecanica-gateway"]
+            grafananlb["NLB interno<br/>Grafana login obrigatório"]
 
             subgraph eks["EKS 1.34 · oficina"]
                 cp["Control plane"]
@@ -149,8 +152,10 @@ flowchart TB
         end
     end
 
-    internet --> elb
-    elb --> pods
+    internet --> gateway
+    gateway -->|rotas protegidas| appnlb
+    gateway -->|/observability| grafananlb
+    appnlb --> pods
     cp -. "agenda" .-> pods
     config --> pods
     ecr -. "imagem" .-> pods
@@ -171,7 +176,7 @@ integração e não implanta nada; a promoção é o merge em `homolog` e, depoi
 
 ```mermaid
 flowchart TB
-    pr["Pull request para a main"]
+    pr["Pull request para main, homolog ou production"]
 
     subgraph ci["Workflow CI · ci.yml"]
         direction TB
@@ -190,7 +195,9 @@ flowchart TB
         direction TB
         dbuild["Build e Tests<br/>./mvnw verify"]
         dimage["Imagem no ECR<br/>publica com a tag do SHA"]
-        dapply["Deploy no cluster<br/>cria os Secret · kubectl apply -k k8s/overlays/&lt;ambiente&gt;<br/>rollout status · smoke test"]
+        dapply["Deploy no cluster<br/>resolve saídas Terraform · ConfigMap e Secrets<br/>rollout status · publica NLB interno"]
+        gateway["Publica listener no S3<br/>reconcilia API Gateway privado"]
+        smoke["Smoke test pela URL do Gateway<br/>remove ELB legado após sucesso"]
     end
 
     cluster["Aplicação no ar<br/>no namespace do ambiente"]
@@ -200,13 +207,12 @@ flowchart TB
     sonar --> main
     manifests --> main
     main --> promo
-    promo --> dbuild --> dimage --> dapply --> cluster
+    promo --> dbuild --> dimage --> dapply --> cluster --> gateway --> smoke
 ```
 
-A etapa que falha interrompe a entrega: teste vermelho não gera imagem, e imagem que não publicou não
-chega ao cluster. O último passo é o **smoke test**, que autentica, abre uma ordem de serviço e a
-recupera na listagem contra o endereço público — se ele passa, o ELB, o pod, o `ConfigMap`, os dois
-`Secret`, a conectividade com o RDS e as migrations estão todos de pé.
+A etapa que falha interrompe a entrega. Depois do rollout, o workflow publica no S3 o listener do NLB interno,
+reconcilia o API Gateway e roda o **smoke test pela URL do Gateway**. Só após sucesso o workflow remove
+o Service público legado.
 
 ---
 
@@ -220,7 +226,7 @@ O projeto é dividido em quatro repositórios, cada um com CI/CD e deploy autom�
 | `oficina-app` (este) | API Quarkus, manifestos `k8s/`, scripts de entrega | Imagem no ECR e a aplicação nos namespaces `homolog` e `production` |
 | `oficina-infra-k8s` | Terraform do cluster | EKS `oficina`, node group `t3.medium` de 2 a 4 nós, ECR `oficina-app`, `metrics-server` |
 | `oficina-infra-db` | Terraform do banco | RDS PostgreSQL 16, um por ambiente (`oficina-homolog`, `oficina-production`), privado |
-| `oficina-lambda-auth` | Função de autenticação por CPF (Go) | Lambda que valida o CPF e emite o JWT aceito pela API |
+| `oficina-lambda-auth` | Autenticação por CPF e validação de JWT (Go) | Lambdas de login e Authorizer HTTP API |
 
 Criados fora do Terraform:
 
@@ -249,7 +255,7 @@ Docker) e sobe **aplicação + PostgreSQL** já configurados. Na primeira execu�
 dependências e leva alguns minutos; nas próximas é quase instantâneo (cache).
 
 - API: `http://localhost:8080`
-- Swagger UI: `http://localhost:8080/q/swagger-ui`
+- Swagger UI: `http://localhost:9000/q/swagger-ui` (interface de gerenciamento)
 - Login: **`admin` / `admin123`** (ver [Autenticação JWT](docs/FASE-1.md#autenticação-jwt))
 
 | Ação                      | Comando                      |
@@ -302,9 +308,12 @@ kubectl get nodes
 kubectl top nodes     # se responder, o metrics-server está de pé e o HPA tem base de cálculo
 ```
 
-As credenciais do lab (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) são
-temporárias. Quando expiram, renove-as no console do lab e atualize os secrets da organização que a
-pipeline usa.
+As credenciais de homolog são os secrets Organization `HOMOLOG_AWS_ACCESS_KEY_ID`,
+`HOMOLOG_AWS_SECRET_ACCESS_KEY` e `HOMOLOG_AWS_SESSION_TOKEN`, liberados apenas aos quatro repositórios.
+Quando expirarem, renove-as no console do lab e atualize esses três secrets. Production continua usando
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN` no Environment `production`.
+`AWS_REGION` e `TF_STATE_BUCKET` já são variables da Organization; variables de Environment com o mesmo
+nome têm precedência.
 
 ---
 
@@ -333,7 +342,7 @@ varia (o host do banco):
 | `Secret` `oficina-mecanica-env`              | criado por script          | Usuário e senha do banco, senhas de seed                                                                     |
 | `Secret` `oficina-mecanica-jwt`              | criado por script          | O par RS256, montado como arquivo em `/etc/jwt`                                                              |
 | `Deployment` `oficina-mecanica`              | `k8s/base/deployment.yaml` | Probes, requests e limits, container non-root; o número de réplicas é do HPA                                 |
-| `Service` `oficina-mecanica`                 | `k8s/base/service.yaml`    | `LoadBalancer`, que o EKS materializa como ELB clássico                                                      |
+| `Service` `oficina-mecanica-gateway`         | `k8s/base/service-gateway.yaml` | `LoadBalancer` interno NLB, alcançado pela VPC Link do API Gateway                                         |
 | `HorizontalPodAutoscaler` `oficina-mecanica` | `k8s/base/hpa.yaml`        | De 1 a 6 réplicas, por CPU e memória                                                                         |
 
 Os dois `Secret` **não** estão em `k8s/` de propósito: senha do banco, credenciais de seed e chave
@@ -361,10 +370,17 @@ nele os secrets abaixo. Cada ambiente tem os seus: é o nome da branch que escol
 | `POSTGRES_USERNAME` / `POSTGRES_PASSWORD`                         | `db_username` e o secret `DB_PASSWORD` do `oficina-infra-db`             |
 | `APP_SEED_ADMIN_PASSWORD` / `APP_SEED_MECHANIC_PASSWORD`          | Escolhidas pelo operador; são as credenciais de acesso à API             |
 | `JWT_PRIVATE_KEY_B64` / `JWT_PUBLIC_KEY_B64`                      | `infra/scripts/generate-jwt-pair.sh`                                     |
+| Variable `JWT_ISSUER`                                             | Issuer compartilhado; default `oficina-api`                              |
+| Variables `AWS_REGION` / `TF_STATE_BUCKET`                        | Região e bucket de states e contratos                                    |
+| Variable `INFRA_RECONCILE_SHA`                                    | SHA completo da revisão publicada de `oficina-infra-k8s` com `reconcile.yml` |
 | `MAIL_USERNAME` / `MAIL_PASSWORD`                                 | Opcionais; sem elas o e-mail só sai se o mailer estiver em modo simulado |
 
-`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN` são secrets da organização e só o job
-da imagem os usa. Eles vencem com a sessão do lab (cerca de quatro horas).
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN` são secrets do Environment, renovados
+a cada sessão do lab (cerca de quatro horas). Jobs separados os usam para publicar a imagem, resolver
+outputs e gravar o contrato upstream.
+Depois de publicar `reconcile.yml` em `oficina-infra-k8s`, substitua `@main` pelo SHA completo no campo
+`uses:` do deploy e configure o mesmo SHA em `INFRA_RECONCILE_SHA`; o workflow valida e faz checkout
+dessa revisão.
 
 O par RS256 vai para os secrets em base64:
 
@@ -380,8 +396,8 @@ Por que a chave sai do build da imagem e o que acontece se ela for regerada:
 ### Pelo caminho de entrega
 
 O workflow **Workflow Deploy** (`.github/workflows/deploy.yml`) roda a cada push em `homolog` ou
-`production`: testa, constrói a imagem, publica no ECR, entrega os segredos, aplica o overlay do ambiente,
-espera o rollout e roda o smoke test. A promoção é o merge `main` → `homolog` → `production`. A tag da
+`production`: testa, constrói a imagem, resolve os outputs Terraform, aplica configuração e secrets,
+espera o rollout, publica o upstream e reconcilia o Gateway antes do smoke test. A promoção é o merge `main` → `homolog` → `production`. A tag da
 imagem é o SHA do commit, e é ela que faz do `kubectl apply` um rollout de verdade — com `latest`, o
 objeto no cluster não mudaria e nenhum pod seria substituído.
 
@@ -390,8 +406,8 @@ horas e o deploy ficaria vermelho por motivo alheio ao código. Ele autentica co
 `ServiceAccount` dedicada, uma por namespace, de modo que o token de homologação não alcança produção
 ([ADR-0002](docs/adr/0002-deploy-no-cluster-via-kubeconfig-de-serviceaccount.md)).
 
-O overlay de `production` nasce com o host do banco marcado como `PREENCHER`, e o deploy recusa esse
-valor: o RDS de produção só existe depois do apply do `oficina-infra-db` naquela branch.
+Os hosts do RDS e do API Gateway não são versionados nos overlays. O workflow obtém os valores dos
+outputs Terraform no bucket `TF_STATE_BUCKET`, com os secrets da sessão do Learner Lab no Environment.
 
 ### Da máquina do operador
 
@@ -413,12 +429,20 @@ kubectl rollout status deploy/oficina-mecanica -n "$NAMESPACE"
 infra/scripts/smoke-test.sh                 # prova de que funcionou, de fora para dentro
 ```
 
-O endereço público sai do `Service`; o ELB leva cerca de um minuto para começar a responder:
+Use o API Gateway para chamadas externas; o NLB interno não aceita tráfego direto da Internet:
 
 ```bash
-ELB="$(kubectl get svc oficina-mecanica -n homolog -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
-curl "http://$ELB/q/health/ready"
+GATEWAY='https://<api-gateway-homolog>'
+curl --request POST --header 'Content-Type: application/json' \
+  --data '{"username":"admin","password":"<senha do seed>"}' \
+  "$GATEWAY/v1/auth/login"
 ```
+
+Health checks e métricas usam a interface interna de gerenciamento na porta 9000. Ela não faz parte
+do `Service` público: o kubelet consulta readiness/liveness por essa porta e o `ServiceMonitor`
+coleta `/q/metrics`. Para inspeção manual, faça `kubectl port-forward svc/oficina-mecanica-management
+-n homolog 9000:9000` e consulte `http://localhost:9000/q/metrics`. O `ClusterIP` não recebe tráfego
+da Internet; o isolamento entre pods depende de NetworkPolicy efetivamente habilitada no CNI do EKS.
 
 ---
 

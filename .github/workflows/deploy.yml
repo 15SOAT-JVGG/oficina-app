@@ -298,12 +298,12 @@ jobs:
       - name: Aguarda o rollout
         run: kubectl rollout status deploy/oficina-mecanica --namespace "$NAMESPACE" --timeout=10m
 
-      - name: Descobre o ELB após readiness
+      - name: Descobre o NLB interno após readiness
         id: upstream
         run: |
-          hostname="$(kubectl get svc oficina-mecanica --namespace "$NAMESPACE" \
+          hostname="$(kubectl get svc oficina-mecanica-gateway --namespace "$NAMESPACE" \
             -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
-          [[ -n "$hostname" ]] || { echo "Service sem hostname de ELB após readiness." >&2; exit 1; }
+          [[ -n "$hostname" ]] || { echo "Service interno sem hostname de NLB após readiness." >&2; exit 1; }
           echo "url=http://$hostname" >> "$GITHUB_OUTPUT"
 
       - name: Diagnóstico da falha
@@ -331,11 +331,33 @@ jobs:
       - name: Publica contrato versionado sem segredos
         run: |
           [[ -n "$UPSTREAM_URL" && -n "$TF_STATE_BUCKET" ]] || { echo "URL upstream ou TF_STATE_BUCKET ausente." >&2; exit 1; }
+          hostname="${UPSTREAM_URL#http://}"
+          load_balancer_arn="$(aws elbv2 describe-load-balancers \
+            --query "LoadBalancers[?DNSName=='${hostname}'].LoadBalancerArn | [0]" --output text)"
+          [[ "$load_balancer_arn" =~ ^arn:[^:]+:elasticloadbalancing: ]] || {
+            echo "Não foi possível resolver o NLB interno pelo hostname do Service." >&2
+            exit 1
+          }
+          listener_arn="$(aws elbv2 describe-listeners --load-balancer-arn "$load_balancer_arn" \
+            --query 'Listeners[?Port==`80`].ListenerArn | [0]' --output text)"
+          [[ "$listener_arn" =~ ^arn:[^:]+:elasticloadbalancing: ]] || {
+            echo "Listener HTTP 80 ausente no NLB interno." >&2
+            exit 1
+          }
+          target_group_arn="$(aws elbv2 describe-target-groups --load-balancer-arn "$load_balancer_arn" \
+            --query 'TargetGroups[0].TargetGroupArn' --output text)"
+          healthy_targets="$(aws elbv2 describe-target-health --target-group-arn "$target_group_arn" \
+            --query 'length(TargetHealthDescriptions[?TargetHealth.State==`healthy`])' --output text)"
+          [[ "$healthy_targets" =~ ^[1-9][0-9]*$ ]] || {
+            echo "O NLB interno ainda não tem target saudável." >&2
+            exit 1
+          }
           contract="$(jq -n \
             --arg account_id "$ACCOUNT_ID" --arg region "$AWS_REGION" \
             --arg environment "$ENVIRONMENT" --arg cluster_name "$CLUSTER_NAME" \
-            --arg upstream_url "$UPSTREAM_URL" --arg source_sha "$GITHUB_SHA" \
-            '{contract_version:1,account_id:$account_id,region:$region,environment:$environment,cluster_name:$cluster_name,upstream_url:$upstream_url,source_sha:$source_sha}')"
+            --arg upstream_url "$UPSTREAM_URL" --arg listener_arn "$listener_arn" \
+            --arg source_sha "$GITHUB_SHA" \
+            '{contract_version:1,account_id:$account_id,region:$region,environment:$environment,cluster_name:$cluster_name,upstream_url:$upstream_url,integration_listener_arn:$listener_arn,source_sha:$source_sha}')"
           printf '%s\n' "$contract" > "$RUNNER_TEMP/upstream.json"
           aws s3 cp "$RUNNER_TEMP/upstream.json" \
             "s3://$TF_STATE_BUCKET/oficina/config/v1/$ENVIRONMENT/upstream.json" --content-type application/json --only-show-errors
@@ -343,12 +365,12 @@ jobs:
   reconcile_gateway:
     name: Reconcilia API Gateway (${{ github.ref_name }})
     needs: [publish_upstream]
-    uses: 15SOAT-JVGG/oficina-infra-k8s/.github/workflows/reconcile.yml@5fde9b837986b63699cc683b7fa0cbe465ef038c
+    uses: 15SOAT-JVGG/oficina-infra-k8s/.github/workflows/reconcile.yml@261e6451b159b2e88dccf392dcbe8847dc4d2d09
     with:
       environment: ${{ github.ref_name }}
       source_kind: app
       source_sha: ${{ github.sha }}
-      infra_ref: 5fde9b837986b63699cc683b7fa0cbe465ef038c
+      infra_ref: 261e6451b159b2e88dccf392dcbe8847dc4d2d09
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       tf_state_bucket: ${{ vars.TF_STATE_BUCKET }}
       jwt_issuer: ${{ vars.JWT_ISSUER || 'oficina-api' }}
@@ -361,6 +383,26 @@ jobs:
       HOMOLOG_AWS_SESSION_TOKEN: ${{ github.ref_name == 'homolog' && secrets.HOMOLOG_AWS_SESSION_TOKEN || '' }}
       AUTHORIZER_TEST_CUSTOMER_CPF: ${{ secrets.AUTHORIZER_TEST_CUSTOMER_CPF }}
 
+  retire_public_origin:
+    name: Remove o ELB público legado após a reconciliação privada
+    needs: [deploy, reconcile_gateway, smoke_test]
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    env:
+      NAMESPACE: ${{ github.ref_name }}
+      KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }}
+    steps:
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.34.1
+
+      - name: Remove o Service público legado depois do Gateway
+        run: |
+          [[ -n "$KUBE_CONFIG_B64" ]] || { echo "KUBE_CONFIG_B64 ausente em $NAMESPACE." >&2; exit 1; }
+          kubeconfig="$RUNNER_TEMP/kubeconfig"
+          (umask 077 && base64 --decode <<<"$KUBE_CONFIG_B64" >"$kubeconfig")
+          echo "KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
+          kubectl delete service oficina-mecanica --namespace "$NAMESPACE" --ignore-not-found
   smoke_test:
     name: Smoke test via API Gateway (${{ github.ref_name }})
     needs: [deploy, resolve_config, reconcile_gateway]
