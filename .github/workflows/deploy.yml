@@ -438,3 +438,17 @@ jobs:
             --request POST --header 'Content-Type: application/json' --data "$payload" \
             "$UPSTREAM_URL/v1/auth/login")"
           [[ "$status" == "200" ]] || { echo "Login direto no ELB devolveu $status." >&2; exit 1; }
+
+  public_docs_smoke_test:
+    name: OpenAPI e Swagger públicos via Gateway
+    needs: [deploy, resolve_config, reconcile_gateway]
+    if: >-
+      always() && needs.deploy.result == 'success' && needs.resolve_config.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      APP_PUBLIC_BASE_URL: ${{ needs.resolve_config.outputs.gateway_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verifica OpenAPI e Swagger sem credenciais
+        run: bash infra/scripts/public-docs-smoke-test.sh "$APP_PUBLIC_BASE_URL"
