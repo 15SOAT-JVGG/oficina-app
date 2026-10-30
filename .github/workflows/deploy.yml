@@ -431,6 +431,7 @@ jobs:
           APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
           APP_SEED_ADMIN_USERNAME: ${{ vars.APP_SEED_ADMIN_USERNAME || 'admin' }}
         if: always()
+        continue-on-error: true
         run: |
           payload="$(jq -nc --arg username "$APP_SEED_ADMIN_USERNAME" --arg password "$APP_SEED_ADMIN_PASSWORD" '{username:$username,password:$password}')"
           status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' \
