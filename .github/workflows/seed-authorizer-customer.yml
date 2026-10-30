@@ -60,7 +60,7 @@ jobs:
             [[ "$status" == 201 ]] || { echo "Customer fixture creation failed with HTTP $status." >&2; exit 1; }
             status=200
           elif [[ "$status" == 200 ]]; then
-            active="$(jq -er '.active' "$response_file")"
+            active="$(jq -r '.active' "$response_file")"
             if [[ "$active" != true ]]; then
               customer_id="$(jq -er '.customerId' "$response_file")"
               status="$(curl --silent --show-error --max-time 30 --output "$response_file" --write-out '%{http_code}' \
