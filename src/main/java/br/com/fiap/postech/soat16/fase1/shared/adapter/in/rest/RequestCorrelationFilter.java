@@ -11,6 +11,7 @@ import jakarta.ws.rs.container.ContainerResponseContext;
 import jakarta.ws.rs.container.ContainerResponseFilter;
 import jakarta.ws.rs.ext.Provider;
 
+import org.jboss.logging.Logger;
 import org.jboss.logging.MDC;
 
 import io.opentelemetry.api.trace.Span;
@@ -46,6 +47,8 @@ public class RequestCorrelationFilter implements ContainerRequestFilter, Contain
         if (requestId instanceof String value) {
             responseContext.getHeaders().putSingle(REQUEST_ID_HEADER, value);
         }
+        Logger.getLogger(RequestCorrelationFilter.class).infof("HTTP completed method=%s status=%d",
+                requestContext.getMethod(), responseContext.getStatus());
         MDC.remove("requestId");
     }
 
