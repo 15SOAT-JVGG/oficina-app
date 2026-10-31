@@ -248,6 +248,9 @@ esperada e não recebe URL/namespace arbitrários. Não entrega imagem nem alter
 O seed cria um lote novo: um cliente, um veículo, uma peça com estoque próprio e a quantidade
 solicitada de OS. As OS são distribuídas em RECEIVED, DIAGNOSIS, WAITING_APPROVAL, IN_PROGRESS,
 COMPLETED e DELIVERED, usando os endpoints reais de orçamento, aprovação, fechamento e entrega.
+Cada escrita do ciclo de OS espera cinco segundos antes de ser enviada, pois também gera
+notificações. Isso evita uma rajada SMTP no sandbox; seis OS levam cerca de dois minutos
+no seed, antes da carga de CPU. O job permite até 45 minutos para o teto de 100 OS.
 Os documentos/placas são gerados para teste; e-mails usam `example.invalid`. Notificações exigem
 mailer mock ou host `sandbox.smtp.mailtrap.io`, que captura mensagens sem entregar a pessoas.
 Nenhum recurso preexistente é atualizado pelo seed. O lote é identificado pelo prefixo FIAP-DEMO.

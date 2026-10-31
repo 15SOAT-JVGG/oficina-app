@@ -56,7 +56,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The 100-order ceiling includes paced SMTP notifications before CPU load.
+    timeout-minutes: 45
     environment: homolog
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
