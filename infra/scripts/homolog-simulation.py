@@ -103,6 +103,8 @@ class Client:
                 body = response.read(1024 * 1024)
             if status != expected:
                 raise SafeFailure(f'Unexpected API response (HTTP {status}).')
+            if not body and status == 201:
+                return {}
             try:
                 return json.loads(body)
             except (ValueError, UnicodeError):
@@ -138,17 +140,21 @@ def seed(api, count, result, pause=time.sleep):
     """Creates a new isolated batch; never retries a write or edits existing fixtures."""
     tag = 'FIAP-DEMO-' + secrets.token_hex(6)
     result['batch'] = tag
-    customer = api.request('POST', '/v1/customer', {
+    customer_document = document()
+    api.request('POST', '/v1/customer', {
         'firstName': 'FIAP Demo', 'lastName': tag,
         'email': tag.lower() + '@example.invalid', 'phoneNumber': '+5511000000000',
-        'document': document()}, expected=201)
-    customer_id = required_id(customer, 'customerId')
+        'document': customer_document}, expected=201)
     result['customers'] = 1
-    vehicle = api.request('POST', '/v1/vehicle', {
-        'customerId': customer_id, 'licensePlate': plate(), 'manufacturer': 'FIAP',
+    customer = api.request('GET', '/v1/customer/by-document/' + customer_document)
+    customer_id = required_id(customer, 'customerId')
+    license_plate = plate()
+    api.request('POST', '/v1/vehicle', {
+        'customerId': customer_id, 'licensePlate': license_plate, 'manufacturer': 'FIAP',
         'model': 'Synthetic Demo', 'color': 'Prata', 'year': 2024, 'kmDriven': 1000, 'type': 'CAR'}, expected=201)
-    vehicle_id = required_id(vehicle, 'id')
     result['vehicles'] = 1
+    vehicle = api.request('GET', '/v1/vehicle/by-license-plate/' + license_plate)
+    vehicle_id = required_id(vehicle, 'id')
     part = api.request('POST', '/admin/parts', {
         'name': tag, 'description': 'Synthetic simulation inventory', 'unitPrice': 50,
         'stockQuantity': count + 10, 'unit': 'UN', 'minimumStock': 0, 'partType': 'PART'}, expected=201)

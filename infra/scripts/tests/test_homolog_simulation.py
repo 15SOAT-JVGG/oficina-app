@@ -29,8 +29,16 @@ class FakeAPI:
         self.next_id += 1
         identifier = str(uuid.UUID(int=self.next_id))
         if method == 'POST' and path == '/v1/customer':
-            return {'customerId': identifier}
-        if method == 'POST' and path in ('/v1/vehicle', '/admin/parts'):
+            self.customer_id = identifier
+            return {}
+        if method == 'GET' and path.startswith('/v1/customer/by-document/'):
+            return {'customerId': self.customer_id}
+        if method == 'POST' and path == '/v1/vehicle':
+            self.vehicle_id = identifier
+            return {}
+        if method == 'GET' and path.startswith('/v1/vehicle/by-license-plate/'):
+            return {'id': self.vehicle_id}
+        if method == 'POST' and path == '/admin/parts':
             return {'id': identifier}
         if method == 'POST' and path == '/v1/work-orders':
             self.state[identifier] = 'RECEIVED'
@@ -107,6 +115,24 @@ class SimulationTests(unittest.TestCase):
         deployment = {'spec': {'template': {'spec': {'containers': [{'env': [{'name': 'MAIL_MOCK', 'value': 'false'}]}]}}}}
         with self.assertRaises(sim.SafeFailure):
             sim.validate_mailer({'data': {'MAIL_MOCK': 'true'}}, deployment)
+
+    def test_empty_201_is_valid_but_empty_200_is_not_json(self):
+        client = sim.Client('https://abc123.execute-api.us-east-1.amazonaws.com', 'fixture', 'fixture')
+        with patch('urllib.request.build_opener') as opener:
+            response = opener.return_value.open.return_value.__enter__.return_value
+            response.status = 201
+            response.read.return_value = b''
+            self.assertEqual({}, client.request('POST', '/v1/customer', {}, expected=201))
+            response.status = 200
+            with self.assertRaises(sim.SafeFailure):
+                client.request('GET', '/v1/customer/by-document/fixture')
+
+    def test_cancelled_client_does_not_schedule_another_write(self):
+        client = sim.Client('https://abc123.execute-api.us-east-1.amazonaws.com', 'fixture', 'fixture')
+        client.stop.set()
+        with patch('urllib.request.build_opener') as opener, self.assertRaises(sim.SafeFailure):
+            client.request('POST', '/v1/customer', {}, expected=201)
+        opener.assert_not_called()
 
     def test_api_error_does_not_echo_response_or_credentials(self):
         client = sim.Client('https://abc123.execute-api.us-east-1.amazonaws.com', 'CANARY_USER', 'CANARY_PASSWORD')
