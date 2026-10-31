@@ -31,7 +31,7 @@ class Settings:
     mode: str = 'seed_and_load'
     orders: int = 12
     duration: int = 180
-    concurrency: int = 12
+    concurrency: int = 4
     cooldown: int = 240
 
     def validate(self):
@@ -91,14 +91,15 @@ class Client:
         if authenticated:
             headers['Authorization'] = 'Bearer ' + self.token
         data = None
-        if payload is not None:
+        if method in ('POST', 'PUT', 'PATCH'):
             headers['Content-Type'] = 'application/json'
+        if payload is not None:
             data = json.dumps(payload).encode()
         request = urllib.request.Request(self.base + path, data=data, headers=headers, method=method)
         start, status = time.monotonic(), 0
         try:
             # An opener per request avoids mutable transport state across workers.
-            with urllib.request.build_opener(NoRedirect()).open(request, timeout=20) as response:
+            with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
                 status = response.status
                 body = response.read(1024 * 1024)
             if status != expected:
@@ -140,6 +141,7 @@ def seed(api, count, result, pause=time.sleep):
     """Creates a new isolated batch; never retries a write or edits existing fixtures."""
     tag = 'FIAP-DEMO-' + secrets.token_hex(6)
     result['batch'] = tag
+    result['phase'] = 'CREATE_CUSTOMER'
     customer_document = document()
     api.request('POST', '/v1/customer', {
         'firstName': 'FIAP Demo', 'lastName': tag,
@@ -148,6 +150,7 @@ def seed(api, count, result, pause=time.sleep):
     result['customers'] = 1
     customer = api.request('GET', '/v1/customer/by-document/' + customer_document)
     customer_id = required_id(customer, 'customerId')
+    result['phase'] = 'CREATE_VEHICLE'
     license_plate = plate()
     api.request('POST', '/v1/vehicle', {
         'customerId': customer_id, 'licensePlate': license_plate, 'manufacturer': 'FIAP',
@@ -155,6 +158,7 @@ def seed(api, count, result, pause=time.sleep):
     result['vehicles'] = 1
     vehicle = api.request('GET', '/v1/vehicle/by-license-plate/' + license_plate)
     vehicle_id = required_id(vehicle, 'id')
+    result['phase'] = 'CREATE_INVENTORY'
     part = api.request('POST', '/admin/parts', {
         'name': tag, 'description': 'Synthetic simulation inventory', 'unitPrice': 50,
         'stockQuantity': count + 10, 'unit': 'UN', 'minimumStock': 0, 'partType': 'PART'}, expected=201)
@@ -163,6 +167,7 @@ def seed(api, count, result, pause=time.sleep):
     result['orders_created'], result['final_states'] = 0, {}
     for index in range(count):
         target = index % len(STATES)
+        result['phase'] = 'CREATE_WORK_ORDER'
         response = api.request('POST', '/v1/work-orders', {
             'customerId': customer_id, 'vehicleId': vehicle_id,
             'description': f'{tag} / synthetic order {index + 1}', 'priority': 'MEDIUM'}, expected=201)
@@ -175,6 +180,7 @@ def seed(api, count, result, pause=time.sleep):
             estimate = api.request('POST', order_path + '/estimate', {'items': [{'partId': part_id, 'quantity': 1}]}, expected=201)
             estimate_id = required_id(estimate, 'estimateId')
         if target >= 3:
+            result['phase'] = 'APPROVE_ESTIMATE'
             api.request('PATCH', order_path + '/estimate/' + estimate_id + '/approve')
         if target >= 4:
             api.request('PATCH', order_path + '/close', {'finalValue': 50})
@@ -185,6 +191,7 @@ def seed(api, count, result, pause=time.sleep):
             raise SafeFailure('Synthetic work order did not reach its intended lifecycle state.')
         result['final_states'][STATES[target]] = result['final_states'].get(STATES[target], 0) + 1
         pause(.25)
+    result['phase'] = 'COMPLETE'
     print('Seed completed: resource counts and final states will appear in the summary.')
 
 
@@ -225,15 +232,27 @@ def snapshot():
     return row
 
 
+def active_workers(elapsed, duration, concurrency):
+    ramp_seconds = min(60, duration / 2)
+    return max(1, min(concurrency, 1 + int((concurrency - 1) * max(0, elapsed) / ramp_seconds)))
+
+
 def run_load(api, settings, stop, result):
     """Login work is bounded by concurrency, deadline and a global 20 requests/sec cap."""
-    deadline = time.monotonic() + settings.duration
-    lock, next_slot = threading.Lock(), time.monotonic()
+    started = time.monotonic()
+    deadline = started + settings.duration
+    lock, next_slot = threading.Lock(), started
     result.update({'attempts': 0, 'errors': 0, 'aborted': False})
 
-    def worker():
+    def worker(index):
         nonlocal next_slot
         while not stop.is_set():
+            now = time.monotonic()
+            if now >= deadline:
+                return
+            if index >= active_workers(now - started, settings.duration, settings.concurrency):
+                stop.wait(.25)
+                continue
             with lock:
                 slot = next_slot
                 next_slot = max(next_slot, time.monotonic()) + .05
@@ -252,7 +271,7 @@ def run_load(api, settings, stop, result):
                     result['aborted'] = True
                     stop.set()
     with concurrent.futures.ThreadPoolExecutor(max_workers=settings.concurrency) as pool:
-        list(pool.map(lambda _: worker(), range(settings.concurrency)))
+        list(pool.map(worker, range(settings.concurrency)))
     if result['errors']:
         raise SafeFailure('Load contained failed requests; see aggregate counts. No further traffic was scheduled after the error budget.')
     if stop.is_set():
@@ -298,7 +317,7 @@ def main():
             settings = Settings(os.environ.get('SIMULATION_MODE', 'seed_and_load'),
                                 int(os.environ.get('SEED_WORK_ORDERS', '12')),
                                 int(os.environ.get('LOAD_DURATION_SECONDS', '180')),
-                                int(os.environ.get('LOAD_CONCURRENCY', '12'))).validate()
+                                int(os.environ.get('LOAD_CONCURRENCY', '4'))).validate()
         except ValueError:
             raise SafeFailure('Simulation numeric inputs must be integers.') from None
         if os.environ.get('TARGET_ENVIRONMENT') != 'homolog':
