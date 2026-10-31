@@ -231,3 +231,51 @@ preserva. Depois de reiniciar:
 Enquanto o banco não está alcançável, a aplicação reinicia em laço com
 `Acquisition timeout while waiting for new connection` no Flyway — é esperado e se resolve sozinho
 quando o banco volta.
+
+## Seed e demonstração de HPA por workflow
+
+Em **Actions → Homolog - seed and HPA simulation → Run workflow**, escolha a branch `main`.
+O workflow opera exclusivamente em `homolog`; resolve o Gateway `oficina-homolog` na conta
+esperada e não recebe URL/namespace arbitrários. Não entrega imagem nem altera o HPA.
+
+| Entrada | Padrão | Limite / efeito |
+|---|---|---|
+| operation | seed_and_load | seed_only, load_only ou seed_and_load |
+| work_orders | 12 | 1-100 OS; ignorado no modo load_only |
+| duration_seconds | 180 | 30-300 segundos de carga |
+| concurrency | 12 | 1-30 workers; limite global de 20 requisições/s |
+
+O seed cria um lote novo: um cliente, um veículo, uma peça com estoque próprio e a quantidade
+solicitada de OS. As OS são distribuídas em RECEIVED, DIAGNOSIS, WAITING_APPROVAL, IN_PROGRESS,
+COMPLETED e DELIVERED, usando os endpoints reais de orçamento, aprovação, fechamento e entrega.
+Os documentos/placas são gerados para teste; e-mails usam `example.invalid`. Notificações exigem
+mailer mock ou host `sandbox.smtp.mailtrap.io`, que captura mensagens sem entregar a pessoas.
+Nenhum recurso preexistente é atualizado pelo seed. O lote é identificado pelo prefixo FIAP-DEMO.
+
+Os registros permanecem em homologação. Cada disparo, inclusive um rerun, cria um novo lote;
+o script não repete automaticamente uma escrita com timeout, pois ela pode ter sido confirmada
+pelo servidor. Não há backdate, alteração SQL, exclusão automática nem relógio de negócio falso.
+O resumo contabiliza somente escritas confirmadas.
+
+A carga usa logins válidos para exercitar BCrypt/CPU. O HPA precisa estar saudável, com métricas de
+CPU e espaço para crescer antes do início. O monitor consulta réplicas atuais, desejadas, Ready e
+CPU/memória a cada 15s; perda de todas as réplicas Ready interrompe novos agendamentos de tráfego.
+Há orçamento de erro e timeout por requisição; nenhuma resposta falha é contabilizada como sucesso.
+Após a carga, observa recuperação por até 240s. O modo com carga reprova se não houver uma réplica
+Ready adicional ou retorno ao número inicial de réplicas. Não força escala nem promete atingir o teto.
+O disparo manual compartilha a trava deploy-homolog com o Workflow Deploy, evitando rollout
+concorrente. Evite outras cargas iniciadas fora desses workflows durante a demonstração.
+
+Pré-requisitos no Environment `homolog`: `APP_SEED_ADMIN_PASSWORD`, opcionalmente a variable
+`APP_SEED_ADMIN_USERNAME`, e os três secrets Organization `HOMOLOG_AWS_*`. O workflow usa acesso
+AWS apenas para validar o alvo/configurar kubeconfig; as consultas de Kubernetes são read-only.
+A aplicação e o banco são acessados exclusivamente pela API pública para criar os dados sintéticos.
+
+No Summary e no artifact `homolog-simulation-<run_id>` ficam somente `summary.json` e `hpa.csv`,
+com contagens, latência p95 medida pelo cliente e evolução de réplicas. Credenciais, CPF, JWT,
+placas, IDs de recursos e corpos de resposta não são impressos nem enviados a artifacts.
+
+Acompanhe os dashboards [Visão geral](https://dcs5hfax0e.execute-api.us-east-1.amazonaws.com/observability/d/oficina-api-jvm)
+e [Infraestrutura](https://dcs5hfax0e.execute-api.us-east-1.amazonaws.com/observability/d/oficina-kubernetes).
+O tráfego produz eventos reais, mas não implementa as séries HTTP/histogramas, agregações de negócio
+ou exportação de traces que a revisão da Fase 3 identificou como pendentes.

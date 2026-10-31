@@ -1,0 +1,112 @@
+name: Homolog - seed and HPA simulation
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Operação em homologação
+        type: choice
+        options: [seed_and_load, seed_only, load_only]
+        default: seed_and_load
+      work_orders:
+        description: OS sintéticas (1-100); ignorado em load_only
+        type: number
+        default: 12
+      duration_seconds:
+        description: Duração da carga (30-300 segundos)
+        type: number
+        default: 180
+      concurrency:
+        description: Workers (1-30); limite global de 20 req/s
+        type: number
+        default: 12
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/homolog-simulation.yml
+      - infra/scripts/homolog-simulation.py
+      - infra/scripts/tests/test_homolog_simulation.py
+
+permissions:
+  contents: read
+
+concurrency:
+  # Share the deployment lock so HPA evidence is not mixed with a rollout.
+  group: ${{ github.event_name == 'workflow_dispatch' && 'deploy-homolog' || format('homolog-simulation-{0}', github.ref) }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate workflow branch and simulation contracts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$EVENT_NAME" == workflow_dispatch && "$REF_NAME" != main ]]; then
+            echo 'Execute este workflow na branch main; o ambiente é sempre homolog.' >&2
+            exit 1
+          fi
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s infra/scripts/tests -p 'test_homolog_simulation.py' -v
+
+  simulate:
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: homolog
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.HOMOLOG_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.HOMOLOG_AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.HOMOLOG_AWS_SESSION_TOKEN }}
+      AWS_EC2_METADATA_DISABLED: 'true'
+      APP_SEED_ADMIN_USERNAME: ${{ vars.APP_SEED_ADMIN_USERNAME || 'admin' }}
+      APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+      TARGET_ENVIRONMENT: homolog
+      SIMULATION_MODE: ${{ inputs.operation }}
+      SEED_WORK_ORDERS: ${{ inputs.work_orders }}
+      LOAD_DURATION_SECONDS: ${{ inputs.duration_seconds }}
+      LOAD_CONCURRENCY: ${{ inputs.concurrency }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-kubectl@c0c8b32d33a5244f1e5947304550403b63930415 # v4
+        with:
+          version: v1.34.0
+      - name: Resolve and verify the homolog endpoint and cluster
+        id: target
+        run: |
+          set -euo pipefail
+          umask 077
+          export KUBECONFIG="$RUNNER_TEMP/simulation-kubeconfig"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+          echo "RESULTS_DIR=$RUNNER_TEMP/simulation-public" >> "$GITHUB_ENV"
+          [[ -n "$AWS_ACCESS_KEY_ID" && -n "$AWS_SECRET_ACCESS_KEY" && -n "$AWS_SESSION_TOKEN" ]]
+          [[ -n "$APP_SEED_ADMIN_PASSWORD" ]]
+          [[ "$AWS_REGION" == us-east-1 ]]
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          [[ "$account_id" == 630266487412 ]] || { echo 'Conta AWS inesperada.' >&2; exit 1; }
+          endpoint="$(aws apigatewayv2 get-apis --query "Items[?Name=='oficina-homolog'].ApiEndpoint | [0]" --output text)"
+          [[ "$endpoint" =~ ^https://[a-z0-9]+\.execute-api\.us-east-1\.amazonaws\.com$ ]]
+          echo "GATEWAY_URL=$endpoint" >> "$GITHUB_ENV"
+          aws eks update-kubeconfig --name oficina --region "$AWS_REGION" >/dev/null
+          kubectl rollout status deployment/oficina-mecanica --namespace homolog --timeout=90s
+      - name: Seed API records, run bounded traffic and observe HPA
+        id: simulation
+        run: python3 infra/scripts/homolog-simulation.py
+      - name: Export aggregate evidence only
+        if: always() && steps.simulation.outcome != 'skipped' && steps.simulation.outcome != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: homolog-simulation-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/simulation-public/summary.json
+            ${{ runner.temp }}/simulation-public/hpa.csv
+          retention-days: 7
+          if-no-files-found: error
+      - name: Remove temporary Kubernetes credentials
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/simulation-kubeconfig"
