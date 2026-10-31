@@ -290,12 +290,15 @@ jobs:
           deployed_image="$(kubectl get deploy/oficina-mecanica --namespace "$NAMESPACE" \
             -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
           kustomize edit set image "oficina-mecanica=$ECR_REPOSITORY_URL:$IMAGE_TAG"
-          if kubectl api-versions | grep -Fxq 'monitoring.coreos.com/v1'; then
+          if kubectl api-versions | grep -Fxq 'monitoring.coreos.com/v1' \
+            && kubectl auth can-i get servicemonitors.monitoring.coreos.com --namespace "$NAMESPACE" --quiet \
+            && kubectl auth can-i create servicemonitors.monitoring.coreos.com --namespace "$NAMESPACE" --quiet \
+            && kubectl auth can-i patch servicemonitors.monitoring.coreos.com --namespace "$NAMESPACE" --quiet; then
             # O Kustomize só carrega arquivos dentro da raiz do overlay.
             cp ../../base/servicemonitor.yaml ./servicemonitor.yaml
             kustomize edit add resource servicemonitor.yaml
           else
-            echo "CRD ServiceMonitor ausente; adiando a métrica do Prometheus até o stack ser instalado."
+            echo "ServiceMonitor delegado ao workflow Apply observability stack (CRD ausente ou acesso restrito)."
           fi
           kubectl apply -k .
           if [[ "$deployed_image" == "$ECR_REPOSITORY_URL:$IMAGE_TAG" ]]; then
