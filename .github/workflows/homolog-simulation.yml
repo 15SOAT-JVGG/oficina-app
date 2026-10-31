@@ -98,7 +98,7 @@ jobs:
       - name: Seed API records, run bounded traffic and observe HPA
         id: simulation
         run: python3 infra/scripts/homolog-simulation.py
-      - name: Export aggregate evidence only
+      - name: Export aggregate evidence and synthetic Postman fixture
         if: always() && steps.simulation.outcome != 'skipped' && steps.simulation.outcome != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -106,6 +106,7 @@ jobs:
           path: |
             ${{ runner.temp }}/simulation-public/summary.json
             ${{ runner.temp }}/simulation-public/hpa.csv
+            ${{ runner.temp }}/simulation-public/FIAP-Massa-Pronta.postman_environment.json
           retention-days: 7
           if-no-files-found: error
       - name: Remove temporary Kubernetes credentials

@@ -276,8 +276,8 @@ Pré-requisitos no Environment `homolog`: `APP_SEED_ADMIN_PASSWORD`, opcionalmen
 AWS apenas para validar o alvo/configurar kubeconfig; as consultas de Kubernetes são read-only.
 A aplicação e o banco são acessados exclusivamente pela API pública para criar os dados sintéticos.
 
-No Summary e no artifact `homolog-simulation-<run_id>` ficam somente `summary.json` e `hpa.csv`,
-com contagens, latência p95 medida pelo cliente e evolução de réplicas. Credenciais, CPF, JWT,
+No Summary e no artifact `homolog-simulation-<run_id>` ficam `summary.json`, `hpa.csv` e a fixture sintética descrita abaixo,
+com contagens, latência p95 medida pelo cliente e evolução de réplicas. Credenciais, JWT,
 placas, IDs de recursos e corpos de resposta não são impressos nem enviados a artifacts.
 
 Acompanhe os dashboards [Visão geral](https://dcs5hfax0e.execute-api.us-east-1.amazonaws.com/observability/d/oficina-api-jvm)
@@ -288,3 +288,12 @@ ou exportação de traces que a revisão da Fase 3 identificou como pendentes.
 O padrão agora executa somente o seed de seis OS, sem carga. Para exercitar HPA,
 selecione load_only ou seed_and_load explicitamente. O perfil leve ainda não comprova
 estabilidade nem garante escala; os critérios de erro e Ready continuam obrigatórios.
+
+### Massa pronta para Postman
+
+Um seed aprovado também exporta FIAP-Massa-Pronta.postman_environment.json no artifact.
+Contém somente CPF gerado para teste e IDs do cliente/veículo/peça criados pelo próprio seed,
+conforme autorização para tornar a massa acadêmica visível. Senha e tokens ficam vazios.
+O Summary continua agregado; nenhum registro preexistente é exportado.
+Importe esse ambiente, preencha adminPassword localmente e execute a collection de ciclo de OS.
+O arquivo só é criado após seed aprovado; load_only não gera fixture.
