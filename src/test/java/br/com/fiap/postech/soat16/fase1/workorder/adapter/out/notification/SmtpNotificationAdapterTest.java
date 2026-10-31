@@ -32,6 +32,7 @@ import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.EstimateSta
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderPriority;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderStatus;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.mailer.Mail;
 import io.quarkus.mailer.reactive.ReactiveMailer;
 import io.smallrye.mutiny.Uni;
@@ -48,10 +49,12 @@ class SmtpNotificationAdapterTest {
     private ReactiveMailer mailer;
 
     private SmtpNotificationAdapter adapter;
+    private SimpleMeterRegistry registry;
 
     @BeforeEach
     void setUp() {
-        adapter = new SmtpNotificationAdapter(mailer, BASE_URL);
+        registry = new SimpleMeterRegistry();
+        adapter = new SmtpNotificationAdapter(mailer, registry, BASE_URL);
     }
 
     @Nested
@@ -67,6 +70,7 @@ class SmtpNotificationAdapterTest {
             adapter.notifyEstimateAwaitingDecision(order, estimate(order), invitation())
                     .await().indefinitely();
 
+            assertEquals(1, registry.get("workshop.integration.calls").tag("outcome", "success").counter().count());
             Mail mail = captureMail();
             assertEquals(List.of(CUSTOMER_EMAIL), mail.getTo());
             assertTrue(mail.getSubject().contains(WORK_ORDER_ID.toString()));
@@ -111,6 +115,7 @@ class SmtpNotificationAdapterTest {
             assertDoesNotThrow(() -> adapter
                     .notifyEstimateAwaitingDecision(order, estimate(order), invitation())
                     .await().indefinitely());
+            assertEquals(1, registry.get("workshop.integration.calls").tag("outcome", "failure").counter().count());
         }
     }
 
