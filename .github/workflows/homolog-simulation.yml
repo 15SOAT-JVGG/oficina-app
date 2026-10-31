@@ -31,7 +31,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: homolog-synthetic-simulation-${{ github.event_name == 'pull_request' && github.ref || 'manual' }}
+  # Share the deployment lock so HPA evidence is not mixed with a rollout.
+  group: ${{ github.event_name == 'workflow_dispatch' && 'deploy-homolog' || format('homolog-simulation-{0}', github.ref) }}
   cancel-in-progress: false
 
 jobs:

@@ -263,7 +263,8 @@ CPU/memória a cada 15s; perda de todas as réplicas Ready interrompe novos agen
 Há orçamento de erro e timeout por requisição; nenhuma resposta falha é contabilizada como sucesso.
 Após a carga, observa recuperação por até 240s. O modo com carga reprova se não houver uma réplica
 Ready adicional ou retorno ao número inicial de réplicas. Não força escala nem promete atingir o teto.
-Evite sobrepor esta demonstração com deploys ou outras cargas.
+O disparo manual compartilha a trava deploy-homolog com o Workflow Deploy, evitando rollout
+concorrente. Evite outras cargas iniciadas fora desses workflows durante a demonstração.
 
 Pré-requisitos no Environment `homolog`: `APP_SEED_ADMIN_PASSWORD`, opcionalmente a variable
 `APP_SEED_ADMIN_USERNAME`, e os três secrets Organization `HOMOLOG_AWS_*`. O workflow usa acesso
