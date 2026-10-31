@@ -1,12 +1,23 @@
 # Oficina Mecânica — Sistema Integrado de Atendimento e Execução de Serviços
 
+## Entrega da Fase 3
+
+- [Vídeo da Fase 3 — 13min29s](https://youtu.be/hgZPRw7hWeA).
+- [Documentos, diagramas e PDF do Portal](https://github.com/15SOAT-JVGG/oficina-infra-k8s/tree/main/docs/fase3).
+- [Swagger de homologação](https://dcs5hfax0e.execute-api.us-east-1.amazonaws.com/q/swagger-ui/).
+- [CI de PRs](https://github.com/15SOAT-JVGG/oficina-app/actions/workflows/ci.yml) valida build, testes, qualidade e segurança.
+- [Deploy](https://github.com/15SOAT-JVGG/oficina-app/actions/workflows/deploy.yml) publica a imagem e implanta em EKS nos pushes em homolog/production, com smokes pelo Gateway.
+- [Seed e demonstração de HPA](https://github.com/15SOAT-JVGG/oficina-app/actions/workflows/homolog-simulation.yml): massa automática ou carga limitada; use `load_only` para demonstrar réplicas sem criar outra massa.
+- [Fluxo de execução, coleção e acessos](https://github.com/15SOAT-JVGG/oficina-infra-k8s/blob/main/docs/fase3/COMECE-AQUI.md). Os acessos de runtime dependem do Learner Lab ativo; documentação e vídeo permanecem disponíveis após o encerramento.
+
+
 Back-end do sistema de uma oficina mecânica — 16SOAT, Tech Challenge. Construído com
 [Quarkus](https://quarkus.io/), aplica **Domain-Driven Design** sobre arquitetura hexagonal, expõe uma
 **API REST documentada (Swagger)** e cobre a gestão de **ordens de serviço, clientes, veículos,
 serviços, peças/insumos (com controle de estoque) e orçamentos**, além de um **canal público** para o
 cliente acompanhar e autorizar o serviço.
 
-A aplicação roda num **cluster EKS** com **Postgres gerenciado no RDS**, exposição por **Load Balancer**,
+A aplicação roda num **cluster EKS** com **Postgres gerenciado no RDS**, entrada pública pelo **API Gateway**, integração por **Load Balancer privado**,
 configuração em `ConfigMap`, credenciais em `Secret`, **escalabilidade automática** por consumo de CPU
 e memória, e um **caminho de entrega automatizado** que a cada push em `homolog` ou `production`
 constrói, publica, implanta e verifica. A infraestrutura é código Terraform em repositórios próprios,
