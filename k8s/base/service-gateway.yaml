@@ -5,6 +5,9 @@ metadata:
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
     service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+    # The controller enabled six NLB zones, while worker targets exist in two.
+    # Route every zonal endpoint to healthy workers during normal traffic/HPA.
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
 spec:
   type: LoadBalancer
   selector:
