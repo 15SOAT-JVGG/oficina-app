@@ -82,8 +82,11 @@ class Client:
         self.counts = collections.Counter()
         self.latencies = []
         self.lock = threading.Lock()
+        self.stop = threading.Event()
 
     def request(self, method, path, payload=None, expected=200, authenticated=True):
+        if self.stop.is_set():
+            raise SafeFailure('Simulation interrupted; no further API requests were scheduled.')
         headers = {'Accept': 'application/json', 'X-Request-ID': 'fiap-demo-' + secrets.token_hex(8)}
         if authenticated:
             headers['Authorization'] = 'Bearer ' + self.token
@@ -281,6 +284,8 @@ def main():
     report = {'outcome': 'failed', 'seed': {}, 'load': {}, 'hpa': []}
     api, monitor, monitor_stop = None, None, threading.Event()
     stop = threading.Event()
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(signum, lambda *_: stop.set())
     monitor_errors = []
     try:
         try:
@@ -296,6 +301,7 @@ def main():
         if not password:
             raise SafeFailure('APP_SEED_ADMIN_PASSWORD is required.')
         api = Client(os.environ.get('GATEWAY_URL', ''), os.environ.get('APP_SEED_ADMIN_USERNAME', 'admin'), password)
+        api.stop = stop
         baseline = snapshot()
         report['hpa'].append(baseline)
         if baseline['ready'] < 1:
@@ -322,8 +328,6 @@ def main():
                         return
             monitor = threading.Thread(target=watch, daemon=True)
             monitor.start()
-            for signum in (signal.SIGTERM, signal.SIGINT):
-                signal.signal(signum, lambda *_: stop.set())
             run_load(api, settings, stop, report['load'])
             print('Traffic finished. Observing HPA recovery without changing replicas.', flush=True)
             recovery_deadline = time.monotonic() + settings.cooldown
@@ -334,6 +338,8 @@ def main():
                     break
             if monitor_errors:
                 raise SafeFailure(monitor_errors[0])
+            if stop.is_set():
+                raise SafeFailure('Simulation interrupted during recovery.')
             report['hpa'].append(snapshot())
             report.update(scale_evidence(report['hpa']))
             if not report['scale_up_observed']:
