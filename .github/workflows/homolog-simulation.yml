@@ -24,6 +24,9 @@ on:
     branches: [main]
     paths:
       - .github/workflows/homolog-simulation.yml
+      - .github/workflows/homolog-maintenance.yml
+      - infra/scripts/maintenance/*.py
+      - infra/scripts/tests/test_homolog_maintenance.py
       - infra/scripts/homolog-simulation.py
       - infra/scripts/tests/test_homolog_simulation.py
 
@@ -50,7 +53,7 @@ jobs:
             echo 'Execute este workflow na branch main; o ambiente é sempre homolog.' >&2
             exit 1
           fi
-          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s infra/scripts/tests -p 'test_homolog_simulation.py' -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s infra/scripts/tests -p 'test_homolog_*.py' -v
 
   simulate:
     if: github.event_name == 'workflow_dispatch'

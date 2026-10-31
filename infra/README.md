@@ -297,3 +297,23 @@ conforme autorização para tornar a massa acadêmica visível. Senha e tokens f
 O Summary continua agregado; nenhum registro preexistente é exportado.
 Importe esse ambiente, preencha adminPassword localmente e execute a collection de ciclo de OS.
 O arquivo só é criado após seed aprovado; load_only não gera fixture.
+
+### Senha do administrador e limpeza de seed (homolog)
+
+Action **Homolog - admin password and seed cleanup**, somente na main.
+Compartilha a trava deploy-homolog com deploy/seed, valida a conta do Lab e usa Job
+temporário sem exposição pública. Job, ConfigMap, secret temporária e kubeconfig são removidos.
+
+- rotate_admin: usa APP_SEED_ADMIN_PASSWORD do Environment homolog, troca o hash BCrypt
+  somente do usuário admin ativo/ADMIN, sincroniza a secret Kubernetes e testa login no Gateway.
+  O seed inicial não troca senha de usuário existente; por isso esta operação é explícita.
+- preview_seed (padrão): informar batch exato FIAP-DEMO-xxxxxxxxxxxx. Retorna só contagens.
+- delete_seed: informar o mesmo batch em batch e confirmation. Remove dependências, OS,
+  veículo, cliente e peça isolados desse lote em transação; não altera usuários da aplicação.
+
+Não existe opção de apagar todas as massas. A ação bloqueia cliente do Authorizer, uso de
+estoque/veículo fora do lote, descrições fora do prefixo, lotes grandes e cardinalidades
+inesperadas. Referências desconhecidas/falhas causam rollback. Não há backup automático
+para exclusão; recriar seed gera novos IDs/CPF e exige importar o novo ambiente Postman.
+Após apagar o lote atualmente publicado, o ambiente Massa Pronta antigo deixa de ser válido.
+A senha não deve ser commitada; o arquivo pessoal de acesso fica fora do repositório.
