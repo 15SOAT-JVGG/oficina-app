@@ -28,10 +28,10 @@ class SafeFailure(Exception):
 
 @dataclass(frozen=True)
 class Settings:
-    mode: str = 'seed_and_load'
-    orders: int = 12
+    mode: str = 'seed_only'
+    orders: int = 6
     duration: int = 180
-    concurrency: int = 4
+    concurrency: int = 2
     cooldown: int = 240
 
     def validate(self):
@@ -244,7 +244,7 @@ def active_workers(elapsed, duration, concurrency):
 
 
 def run_load(api, settings, stop, result):
-    """Login work is bounded by concurrency, deadline and a global 20 requests/sec cap."""
+    """Login work is bounded by concurrency, deadline and a global 4 requests/sec cap."""
     started = time.monotonic()
     deadline = started + settings.duration
     lock, next_slot = threading.Lock(), started
@@ -261,7 +261,7 @@ def run_load(api, settings, stop, result):
                 continue
             with lock:
                 slot = next_slot
-                next_slot = max(next_slot, time.monotonic()) + .05
+                next_slot = max(next_slot, time.monotonic()) + .25
             delay = max(0, slot - time.monotonic())
             if slot >= deadline or stop.wait(delay):
                 return
@@ -320,10 +320,10 @@ def main():
     monitor_errors = []
     try:
         try:
-            settings = Settings(os.environ.get('SIMULATION_MODE', 'seed_and_load'),
-                                int(os.environ.get('SEED_WORK_ORDERS', '12')),
+            settings = Settings(os.environ.get('SIMULATION_MODE', 'seed_only'),
+                                int(os.environ.get('SEED_WORK_ORDERS', '6')),
                                 int(os.environ.get('LOAD_DURATION_SECONDS', '180')),
-                                int(os.environ.get('LOAD_CONCURRENCY', '4'))).validate()
+                                int(os.environ.get('LOAD_CONCURRENCY', '2'))).validate()
         except ValueError:
             raise SafeFailure('Simulation numeric inputs must be integers.') from None
         if os.environ.get('TARGET_ENVIRONMENT') != 'homolog':

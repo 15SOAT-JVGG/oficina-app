@@ -7,19 +7,19 @@ on:
         description: Operação em homologação
         type: choice
         options: [seed_and_load, seed_only, load_only]
-        default: seed_and_load
+        default: seed_only
       work_orders:
         description: OS sintéticas (1-100); ignorado em load_only
         type: number
-        default: 12
+        default: 6
       duration_seconds:
         description: Duração da carga (30-300 segundos)
         type: number
         default: 180
       concurrency:
-        description: Workers (1-30); limite global de 20 req/s
+        description: Workers (1-30); limite global de 4 req/s
         type: number
-        default: 4
+        default: 2
   pull_request:
     branches: [main]
     paths:

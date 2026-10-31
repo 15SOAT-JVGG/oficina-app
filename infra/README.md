@@ -240,10 +240,10 @@ esperada e não recebe URL/namespace arbitrários. Não entrega imagem nem alter
 
 | Entrada | Padrão | Limite / efeito |
 |---|---|---|
-| operation | seed_and_load | seed_only, load_only ou seed_and_load |
-| work_orders | 12 | 1-100 OS; ignorado no modo load_only |
+| operation | seed_only | seed_only, load_only ou seed_and_load |
+| work_orders | 6 | 1-100 OS; ignorado no modo load_only |
 | duration_seconds | 180 | 30-300 segundos de carga |
-| concurrency | 4 | 1-30 workers; limite global de 20 requisições/s |
+| concurrency | 2 | 1-30 workers; limite global de 4 requisições/s |
 
 O seed cria um lote novo: um cliente, um veículo, uma peça com estoque próprio e a quantidade
 solicitada de OS. As OS são distribuídas em RECEIVED, DIAGNOSIS, WAITING_APPROVAL, IN_PROGRESS,
@@ -261,7 +261,7 @@ pelo servidor. Não há backdate, alteração SQL, exclusão automática nem rel
 O resumo contabiliza somente escritas confirmadas.
 
 A carga usa logins válidos para exercitar BCrypt/CPU. A concorrência sobe de um worker até
-o valor escolhido numa rampa de até 60s, dando tempo para o HPA reagir. O padrão é de quatro
+o valor escolhido numa rampa de até 60s, dando tempo para o HPA reagir. O padrão é de dois
 workers; valores maiores podem provocar reprovação pelo orçamento de erros. O HPA precisa estar saudável, com métricas de
 CPU e espaço para crescer antes do início. O monitor consulta réplicas atuais, desejadas, Ready e
 CPU/memória a cada 15s; perda de todas as réplicas Ready interrompe novos agendamentos de tráfego.
@@ -284,3 +284,7 @@ Acompanhe os dashboards [Visão geral](https://dcs5hfax0e.execute-api.us-east-1.
 e [Infraestrutura](https://dcs5hfax0e.execute-api.us-east-1.amazonaws.com/observability/d/oficina-kubernetes).
 O tráfego produz eventos reais, mas não implementa as séries HTTP/histogramas, agregações de negócio
 ou exportação de traces que a revisão da Fase 3 identificou como pendentes.
+
+O padrão agora executa somente o seed de seis OS, sem carga. Para exercitar HPA,
+selecione load_only ou seed_and_load explicitamente. O perfil leve ainda não comprova
+estabilidade nem garante escala; os critérios de erro e Ready continuam obrigatórios.
