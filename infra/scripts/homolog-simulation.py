@@ -139,6 +139,12 @@ def required_id(body, key):
 
 def seed(api, count, result, pause=time.sleep):
     """Creates a new isolated batch; never retries a write or edits existing fixtures."""
+    def change_order(method, path, payload=None, expected=200):
+        # A lifecycle mutation sends one notification (an estimate can send two).
+        # Keep SMTP sandbox traffic apart from the subsequent CPU load phase.
+        pause(5)
+        return api.request(method, path, payload, expected=expected)
+
     tag = 'FIAP-DEMO-' + secrets.token_hex(6)
     result['batch'] = tag
     result['phase'] = 'CREATE_CUSTOMER'
@@ -168,24 +174,24 @@ def seed(api, count, result, pause=time.sleep):
     for index in range(count):
         target = index % len(STATES)
         result['phase'] = 'CREATE_WORK_ORDER'
-        response = api.request('POST', '/v1/work-orders', {
+        response = change_order('POST', '/v1/work-orders', {
             'customerId': customer_id, 'vehicleId': vehicle_id,
             'description': f'{tag} / synthetic order {index + 1}', 'priority': 'MEDIUM'}, expected=201)
         order_id = required_id(response.get('workOrder', {}), 'workOrderId')
         result['orders_created'] += 1
         order_path = '/v1/work-orders/' + order_id
         if target >= 1:
-            api.request('PATCH', order_path + '/status', {'status': 'DIAGNOSIS'})
+            change_order('PATCH', order_path + '/status', {'status': 'DIAGNOSIS'})
         if target >= 2:
-            estimate = api.request('POST', order_path + '/estimate', {'items': [{'partId': part_id, 'quantity': 1}]}, expected=201)
+            estimate = change_order('POST', order_path + '/estimate', {'items': [{'partId': part_id, 'quantity': 1}]}, expected=201)
             estimate_id = required_id(estimate, 'estimateId')
         if target >= 3:
             result['phase'] = 'APPROVE_ESTIMATE'
-            api.request('PATCH', order_path + '/estimate/' + estimate_id + '/approve')
+            change_order('PATCH', order_path + '/estimate/' + estimate_id + '/approve')
         if target >= 4:
-            api.request('PATCH', order_path + '/close', {'finalValue': 50})
+            change_order('PATCH', order_path + '/close', {'finalValue': 50})
         if target >= 5:
-            api.request('PATCH', order_path + '/status', {'status': 'DELIVERED'})
+            change_order('PATCH', order_path + '/status', {'status': 'DELIVERED'})
         observed = api.request('GET', order_path)
         if observed.get('status') != STATES[target]:
             raise SafeFailure('Synthetic work order did not reach its intended lifecycle state.')

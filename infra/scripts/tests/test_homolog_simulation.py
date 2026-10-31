@@ -107,6 +107,15 @@ class SimulationTests(unittest.TestCase):
                 sim.seed(api, 6, {}, pause=lambda _: None)
         self.assertEqual(1, request.call_count)
 
+    def test_seed_paces_every_notification_mutation_before_sending(self):
+        api, waits = FakeAPI(), []
+        with patch('sys.stdout', new=io.StringIO()):
+            sim.seed(api, 6, {}, pause=lambda seconds: waits.append((seconds, len(api.calls))))
+        mutations = [index for index, (method, path, _) in enumerate(api.calls)
+                     if method in ('POST', 'PATCH') and path.startswith('/v1/work-orders')]
+        self.assertEqual(mutations, [index for seconds, index in waits if seconds == 5])
+        self.assertEqual(21, len(mutations))
+
     def test_mailer_accepts_only_mock_or_known_capture_sandbox(self):
         for config in [{}, {'MAIL_MOCK': 'true'}, {'MAIL_MOCK': 'false', 'MAIL_HOST': 'sandbox.smtp.mailtrap.io'}]:
             sim.validate_mailer({'data': config}, {})
