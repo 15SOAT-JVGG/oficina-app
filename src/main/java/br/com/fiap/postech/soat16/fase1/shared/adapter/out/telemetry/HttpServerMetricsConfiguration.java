@@ -1,5 +1,8 @@
 package br.com.fiap.postech.soat16.fase1.shared.adapter.out.telemetry;
 
+import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
+
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Singleton;
@@ -27,7 +30,9 @@ public class HttpServerMetricsConfiguration {
                     return config;
                 }
                 return DistributionStatisticConfig.builder()
-                        .serviceLevelObjectives(HTTP_LATENCY_BUCKETS_SECONDS)
+                        .serviceLevelObjectives(Arrays.stream(HTTP_LATENCY_BUCKETS_SECONDS)
+                                .map(seconds -> seconds * TimeUnit.SECONDS.toNanos(1))
+                                .toArray())
                         .build()
                         .merge(config);
             }
