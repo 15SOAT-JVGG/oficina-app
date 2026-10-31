@@ -281,7 +281,7 @@ jobs:
         run: |
           bash infra/scripts/render-deploy-configmap.sh > k8s/overlays/$NAMESPACE/configmap-patch.yaml
           overlay="$GITHUB_WORKSPACE/k8s/overlays/$NAMESPACE"
-          trap 'rm -f "$overlay/configmap-patch.yaml"; git checkout -- "$overlay/kustomization.yaml"' EXIT
+          trap 'rm -f "$overlay/configmap-patch.yaml" "$overlay/servicemonitor.yaml"; git checkout -- "$overlay/kustomization.yaml"' EXIT
           cat >> k8s/overlays/$NAMESPACE/kustomization.yaml <<'KUSTOMIZATION'
           patches:
             - path: configmap-patch.yaml
@@ -291,7 +291,9 @@ jobs:
             -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
           kustomize edit set image "oficina-mecanica=$ECR_REPOSITORY_URL:$IMAGE_TAG"
           if kubectl api-versions | grep -Fxq 'monitoring.coreos.com/v1'; then
-            kustomize edit add resource ../../base/servicemonitor.yaml
+            # O Kustomize só carrega arquivos dentro da raiz do overlay.
+            cp ../../base/servicemonitor.yaml ./servicemonitor.yaml
+            kustomize edit add resource servicemonitor.yaml
           else
             echo "CRD ServiceMonitor ausente; adiando a métrica do Prometheus até o stack ser instalado."
           fi
