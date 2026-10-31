@@ -243,7 +243,7 @@ esperada e não recebe URL/namespace arbitrários. Não entrega imagem nem alter
 | operation | seed_and_load | seed_only, load_only ou seed_and_load |
 | work_orders | 12 | 1-100 OS; ignorado no modo load_only |
 | duration_seconds | 180 | 30-300 segundos de carga |
-| concurrency | 12 | 1-30 workers; limite global de 20 requisições/s |
+| concurrency | 4 | 1-30 workers; limite global de 20 requisições/s |
 
 O seed cria um lote novo: um cliente, um veículo, uma peça com estoque próprio e a quantidade
 solicitada de OS. As OS são distribuídas em RECEIVED, DIAGNOSIS, WAITING_APPROVAL, IN_PROGRESS,
@@ -257,7 +257,9 @@ o script não repete automaticamente uma escrita com timeout, pois ela pode ter 
 pelo servidor. Não há backdate, alteração SQL, exclusão automática nem relógio de negócio falso.
 O resumo contabiliza somente escritas confirmadas.
 
-A carga usa logins válidos para exercitar BCrypt/CPU. O HPA precisa estar saudável, com métricas de
+A carga usa logins válidos para exercitar BCrypt/CPU. A concorrência sobe de um worker até
+o valor escolhido numa rampa de até 60s, dando tempo para o HPA reagir. O padrão é de quatro
+workers; valores maiores podem provocar reprovação pelo orçamento de erros. O HPA precisa estar saudável, com métricas de
 CPU e espaço para crescer antes do início. O monitor consulta réplicas atuais, desejadas, Ready e
 CPU/memória a cada 15s; perda de todas as réplicas Ready interrompe novos agendamentos de tráfego.
 Há orçamento de erro e timeout por requisição; nenhuma resposta falha é contabilizada como sucesso.

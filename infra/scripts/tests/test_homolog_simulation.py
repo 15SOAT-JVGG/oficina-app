@@ -134,6 +134,22 @@ class SimulationTests(unittest.TestCase):
             client.request('POST', '/v1/customer', {}, expected=201)
         opener.assert_not_called()
 
+    def test_patch_without_body_still_declares_json_content_type(self):
+        client = sim.Client('https://abc123.execute-api.us-east-1.amazonaws.com', 'fixture', 'fixture')
+        with patch('urllib.request.build_opener') as opener:
+            response = opener.return_value.open.return_value.__enter__.return_value
+            response.status, response.read.return_value = 200, b'{}'
+            client.request('PATCH', '/v1/work-orders/fixture/estimate/fixture/approve')
+            request = opener.return_value.open.call_args.args[0]
+            self.assertEqual('application/json', request.get_header('Content-type'))
+
+    def test_ramp_starts_with_one_worker_and_reaches_the_requested_ceiling(self):
+        self.assertEqual(1, sim.active_workers(0, 180, 4))
+        self.assertEqual(2, sim.active_workers(30, 180, 4))
+        self.assertEqual(4, sim.active_workers(60, 180, 4))
+        self.assertEqual(4, sim.active_workers(180, 180, 4))
+        self.assertEqual(4, sim.active_workers(15, 30, 4))
+
     def test_api_error_does_not_echo_response_or_credentials(self):
         client = sim.Client('https://abc123.execute-api.us-east-1.amazonaws.com', 'CANARY_USER', 'CANARY_PASSWORD')
         error = urllib.error.HTTPError(client.base, 500, 'private detail', {}, io.BytesIO(b'CANARY_RESPONSE'))
