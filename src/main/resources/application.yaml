@@ -11,6 +11,21 @@ quarkus:
   http:
     port: 8080
 
+  management:
+    enabled: true
+    host: 0.0.0.0
+    port: 9000
+    root-path: /q
+
+  micrometer:
+    export:
+      prometheus:
+        path: metrics
+    binder:
+      http-server:
+        enabled: true
+      jvm: true
+
   security:
     jaxrs:
       deny-unannotated-endpoints: true
@@ -50,21 +65,21 @@ quarkus:
 
   otel:
     sdk:
-      disabled: true
+      # Export fica desligado no desenvolvimento local sem coletor. O ConfigMap
+      # do Kubernetes ativa apenas tracing OTLP e preserva metrics em Prometheus.
+      disabled: ${OTEL_SDK_DISABLED:true}
     exporter:
       otlp:
-        traces:
-          endpoint: http://${INFRA_HOST_OTEL:localhost:4317}
-        metrics:
-          endpoint: http://${INFRA_HOST_OTEL:localhost:4317}
-        logs:
-          endpoint: http://${INFRA_HOST_OTEL:localhost:4317}
+        endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}
+        protocol: grpc
+        timeout: 3s
     traces:
-      sampler: parentbased_always_on
+      sampler: ${OTEL_TRACES_SAMPLER:parentbased_traceidratio}
     metrics:
-      enabled: true
+      exporter: none
     logs:
-      enabled: true
+      exporter: none
+    propagators: tracecontext,baggage
     resource:
       attributes:
         - "service.name=${quarkus.application.name}"
@@ -72,11 +87,25 @@ quarkus:
 
   log:
     console:
-      format: "%d{yyyy-MM-dd HH:mm:ss} %-5p [%c{2.}] req=%X{requestId} trace=%X{traceId} span=%X{spanId} %s%e%n"
+      json:
+        enabled: true
+        pretty-print: false
+        additional-field:
+          service:
+            value: ${quarkus.application.name}
+          version:
+            value: ${quarkus.application.version}
+          environment:
+            value: ${APP_ENVIRONMENT:local}
 
   # ── OpenAPI / Swagger UI ──────────────────────────────────────────────────--
   smallrye-openapi:
-    path: /q/openapi                 # spec at /q/openapi (JSON) and /q/openapi?format=yaml
+    # Mantém o OpenAPI disponível no servidor principal (8080), que é o
+    # upstream publicado no API Gateway. Métricas e health continuam na porta
+    # de management (9000); nenhuma rota de management precisa ser exposta.
+    management:
+      enabled: false
+    path: /q/openapi                 # YAML por padrão; ?format=json solicita JSON.
     info-title: Mechanic Workshop API
     info-version: ${project.version}
     info-description: Mechanic workshop management API (16SOAT - Tech Challenge Phase 1)

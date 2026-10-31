@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oficina-mecanica-management
+  labels:
+    app.kubernetes.io/name: oficina-mecanica
+    monitoring: oficina-mecanica
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: oficina-mecanica
+  ports:
+    - name: management
+      port: 9000
+      targetPort: management
+      protocol: TCP

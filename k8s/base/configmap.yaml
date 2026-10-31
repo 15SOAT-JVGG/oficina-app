@@ -3,13 +3,15 @@ kind: ConfigMap
 metadata:
   name: oficina-mecanica-config
 data:
-  # O endereço do RDS (INFRA_HOST_POSTGRES) e o endereço público da API
-  # (APP_PUBLIC_BASE_URL) variam por ambiente e por isso vivem no patch de cada overlay,
-  # em k8s/overlays/<ambiente>/configmap-patch.yaml.
-  #
-  # O database é o mesmo nos dois ambientes porque cada ambiente tem a sua própria
-  # instância RDS (repositório oficina-infra-db); o que os separa é o host, não o nome.
-  POSTGRES_DB: oficina
+  # O listener de gerenciamento tem Service ClusterIP separado; o Service público
+  # continua encaminhando somente a porta HTTP 8080.
+  QUARKUS_MANAGEMENT_PORT: "9000"
+  QUARKUS_MANAGEMENT_ROOT_PATH: /q
+  QUARKUS_MICROMETER_EXPORT_PROMETHEUS_PATH: metrics
+  OTEL_SDK_DISABLED: "false"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy.observability.svc.cluster.local:4317
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
 
   # O RDS recusa conexão sem criptografia. As duas variáveis andam juntas: `require`
   # cifra o transporte, e sem confiar na cadeia o cliente reativo aborta o handshake,

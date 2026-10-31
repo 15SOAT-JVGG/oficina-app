@@ -104,7 +104,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: maven
 
       # A escolha entra por variável de ambiente, e não interpolada no comando: expressão
       # do GitHub dentro de `run` é injeção de shell, porque o valor é colado no script

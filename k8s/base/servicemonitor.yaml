@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: oficina-mecanica
+  labels:
+    release: observability
+    app.kubernetes.io/name: oficina-mecanica
+spec:
+  namespaceSelector:
+    any: false
+  selector:
+    matchLabels:
+      monitoring: oficina-mecanica
+  endpoints:
+    - port: management
+      path: /q/metrics
+      interval: 30s
+      scrapeTimeout: 10s

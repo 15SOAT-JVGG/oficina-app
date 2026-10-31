@@ -12,6 +12,8 @@ import br.com.fiap.postech.soat16.fase1.workorder.application.port.out.WorkOrder
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.Estimate;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.WorkOrder;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.logging.Log;
 import io.quarkus.mailer.Mail;
 import io.quarkus.mailer.reactive.ReactiveMailer;
@@ -34,13 +36,18 @@ public class SmtpNotificationAdapter implements WorkOrderNotificationPort {
             DateTimeFormatter.ofPattern("dd/MM/yyyy 'às' HH:mm");
 
     private final ReactiveMailer mailer;
+    private final Counter successes;
+    private final Counter failures;
     private final String publicBaseUrl;
 
     public SmtpNotificationAdapter(
             ReactiveMailer mailer,
+            MeterRegistry registry,
             @ConfigProperty(name = "app.public-base-url", defaultValue = "http://localhost:8080")
             String publicBaseUrl) {
         this.mailer = mailer;
+        successes = registry.counter("workshop.integration.calls", "integration", "smtp", "outcome", "success");
+        failures = registry.counter("workshop.integration.calls", "integration", "smtp", "outcome", "failure");
         this.publicBaseUrl = publicBaseUrl;
     }
 
@@ -105,9 +112,10 @@ public class SmtpNotificationAdapter implements WorkOrderNotificationPort {
      */
     private Uni<Void> deliver(WorkOrder order, String subject, Mail mail) {
         return mailer.send(mail)
+                .invoke(() -> successes.increment())
                 .onFailure().recoverWithItem(failure -> {
-                    Log.warnf("Notificacao nao entregue: OS %s. Assunto=%s Causa=%s",
-                            order.getId(), subject, failure.getMessage());
+                    failures.increment();
+                    Log.warnf("Notificacao nao entregue. Operacao=%s Tipo=%s", subject, failure.getClass().getSimpleName());
                     return null;
                 });
     }
