@@ -1,0 +1,67 @@
+name: Homolog - admin password and seed cleanup
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Operação apenas em homologação
+        type: choice
+        options: [preview_seed, delete_seed, rotate_admin]
+        default: preview_seed
+      batch:
+        description: Lote exato FIAP-DEMO-xxxxxxxxxxxx (obrigatório para limpeza)
+        type: string
+        default: ''
+      confirmation:
+        description: Para excluir, repetir exatamente o lote; ignorado na prévia/rotação
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: deploy-homolog
+  cancel-in-progress: false
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: homolog
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${{ secrets.HOMOLOG_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.HOMOLOG_AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.HOMOLOG_AWS_SESSION_TOKEN }}
+      APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+      AUTHORIZER_TEST_CUSTOMER_CPF: ${{ secrets.AUTHORIZER_TEST_CUSTOMER_CPF }}
+      MAINTENANCE_OPERATION: ${{ inputs.operation }}
+      SEED_BATCH: ${{ inputs.batch }}
+      DELETE_CONFIRMATION: ${{ inputs.confirmation }}
+      REF_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate restricted scope
+        run: |
+          [[ "$REF_NAME" == main ]] || { echo 'Execute apenas na main.' >&2; exit 1; }
+          python3 - <<'PY'
+          import os, runpy
+          module = runpy.run_path('infra/scripts/maintenance/database.py')
+          module['validate'](os.environ['MAINTENANCE_OPERATION'], os.environ['SEED_BATCH'], os.environ['DELETE_CONFIRMATION'])
+          PY
+          [[ "$(aws sts get-caller-identity --query Account --output text)" == 630266487412 ]]
+      - uses: azure/setup-kubectl@c0c8b32d33a5244f1e5947304550403b63930415 # v4
+        with:
+          version: v1.34.0
+      - name: Connect only to homolog cluster
+        run: |
+          umask 077
+          export KUBECONFIG="$RUNNER_TEMP/maintenance-kubeconfig"
+          echo "KUBECONFIG=$KUBECONFIG" >> "$GITHUB_ENV"
+          aws eks update-kubeconfig --name oficina --region "$AWS_REGION" >/dev/null
+          kubectl rollout status deployment/oficina-mecanica --namespace homolog --timeout=90s
+          endpoint="$(aws apigatewayv2 get-apis --query "Items[?Name=='oficina-homolog'].ApiEndpoint | [0]" --output text)"
+          [[ "$endpoint" =~ ^https://[a-z0-9]+\.execute-api\.us-east-1\.amazonaws\.com$ ]]
+          echo "GATEWAY_URL=$endpoint" >> "$GITHUB_ENV"
+      - name: Execute bounded maintenance and verify
+        run: python3 infra/scripts/maintenance/run.py
+      - name: Remove temporary cluster credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/maintenance-kubeconfig"
