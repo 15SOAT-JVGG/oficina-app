@@ -170,6 +170,8 @@ def seed(api, count, result, pause=time.sleep):
         'stockQuantity': count + 10, 'unit': 'UN', 'minimumStock': 0, 'partType': 'PART'}, expected=201)
     part_id = required_id(part, 'id')
     result['parts'] = 1
+    api.demo_fixture = {'demoCpf': customer_document, 'customerId': customer_id,
+                        'vehicleId': vehicle_id, 'partId': part_id, 'demoName': tag}
     result['orders_created'], result['final_states'] = 0, {}
     for index in range(count):
         target = index % len(STATES)
@@ -296,6 +298,15 @@ def write_report(report, api):
     report['client_p95_seconds'] = round(latencies[max(0, math.ceil(.95 * len(latencies)) - 1)], 3) if latencies else None
     target = Path(os.environ.get('RESULTS_DIR', '/tmp/fiap-simulation-public'))
     target.mkdir(parents=True, exist_ok=True)
+    if report.get('outcome') == 'success' and getattr(api, 'demo_fixture', None):
+        values = {'baseUrl': api.base, 'adminUsername': 'admin', 'adminPassword': '',
+                  'adminToken': '', 'customerToken': '', 'workOrderId': '', 'estimateId': '',
+                  **api.demo_fixture}
+        environment = {'name': 'FIAP homolog - massa pronta', '_postman_variable_scope': 'environment',
+                       'values': [{'key': key, 'value': value, 'enabled': True,
+                                   'type': 'secret' if key in ('adminPassword', 'adminToken', 'customerToken') else 'default'}
+                                  for key, value in values.items()]}
+        (target / 'FIAP-Massa-Pronta.postman_environment.json').write_text(json.dumps(environment, indent=2) + '\n')
     (target / 'summary.json').write_text(json.dumps(report, indent=2) + '\n')
     fields = ['time_utc', 'current', 'desired', 'ready', 'minimum', 'maximum', 'cpu_percent', 'memory_percent']
     with (target / 'hpa.csv').open('w') as output:
@@ -303,7 +314,7 @@ def write_report(report, api):
         writer.writeheader()
         writer.writerows(report['hpa'])
     summary = '\n'.join(['## Homolog: synthetic seed and load', '', '```json', json.dumps(report, indent=2), '```', '',
-                          'Only aggregate evidence is exported. Seed records remain in homolog; each execution creates a new batch.',
+                          'Evidence includes aggregates and a synthetic-only Postman fixture after successful seed; no credentials or tokens. Seed records remain in homolog; each execution creates a new batch.',
                           'HPA behavior is observed, never forced. Seed traffic does not implement missing application business metrics.'])
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(summary + '\n')

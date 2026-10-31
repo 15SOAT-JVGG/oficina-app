@@ -201,6 +201,23 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(2, row['ready'])
         self.assertEqual(3, row['desired'])
 
+    def test_fixture_exports_only_synthetic_fields_after_success(self):
+        client = sim.Client('https://abc123.execute-api.us-east-1.amazonaws.com', 'CANARY_USER', 'CANARY_PASSWORD')
+        client.demo_fixture = {'demoCpf': 'generated-fixture', 'customerId': 'generated-id'}
+        client.token = 'CANARY_TOKEN'
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'RESULTS_DIR': directory}, clear=True), patch('sys.stdout', new=io.StringIO()):
+            path = Path(directory, 'FIAP-Massa-Pronta.postman_environment.json')
+            sim.write_report({'outcome': 'failed', 'hpa': []}, client)
+            self.assertFalse(path.exists())
+            sim.write_report({'outcome': 'success', 'hpa': []}, client)
+            text = path.read_text()
+            self.assertNotIn('CANARY', text)
+            values = {item['key']: item['value'] for item in json.loads(text)['values']}
+            self.assertEqual('generated-fixture', values['demoCpf'])
+            self.assertEqual('', values['adminPassword'])
+            self.assertEqual('', values['adminToken'])
+            self.assertEqual('', values['customerToken'])
+
     def test_report_contains_only_aggregates_and_no_token(self):
         client = sim.Client('https://abc123.execute-api.us-east-1.amazonaws.com', 'CANARY_USER', 'CANARY_PASSWORD')
         client.token = 'CANARY_TOKEN'
