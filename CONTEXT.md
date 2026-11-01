@@ -26,6 +26,9 @@
   execução e que espera uma decisão da oficina, porque trabalho já feito não se desfaz.
 - **Fila operacional:** conjunto das Ordens de Serviço ainda em atendimento, do estágio de trabalho
   mais avançado para o recém-recebido e, dentro de cada estágio, da mais antiga para a mais recente.
+- **Fila de execução:** Ordens de Serviço com orçamento aprovado esperando ou em reparo, da mais
+  antiga para a mais recente. É a fila dos mecânicos, distinta da fila operacional, que cobre todo o
+  atendimento.
 - **Reserva:** separação das peças do orçamento no estoque no momento em que a oficina passa a
   aguardar a decisão do cliente; a aprovação a mantém e a recusa a devolve.
 - **Solicitação inicial:** serviços e peças informados na abertura da Ordem de Serviço, que nascem
