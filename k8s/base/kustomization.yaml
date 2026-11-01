@@ -6,7 +6,8 @@ kind: Kustomization
 resources:
   - configmap.yaml
   - deployment.yaml
-  - service.yaml
+  - service-gateway.yaml
+  - service-management.yaml
   - hpa.yaml
 
 labels:

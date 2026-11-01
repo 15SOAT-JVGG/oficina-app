@@ -161,6 +161,7 @@ find_created_work_order() {
 }
 
 echo "Smoke test contra $BASE_URL"
+bash infra/scripts/public-docs-smoke-test.sh "$BASE_URL"
 
 wait_until_ready
 echo "1/4 API e banco prontos"
