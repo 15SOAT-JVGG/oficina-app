@@ -1,5 +1,7 @@
 # Quatro repositórios com deploy por branch e um cluster para dois ambientes
 
+> Para as decisões planejadas da Fase 4, veja o [ADR-0008](0008-fronteiras-e-saga-da-fase-4.md). Este registro preserva a decisão anterior.
+
 O sistema é dividido em quatro repositórios, cada um com a própria pipeline: `oficina-app` (API e
 manifestos), `oficina-infra-k8s` (EKS, ECR e `metrics-server`), `oficina-infra-db` (RDS) e
 `oficina-lambda-auth` (autenticação por CPF). Em todos, `main` é a branch de integração e as

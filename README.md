@@ -81,6 +81,9 @@ mudou aqui.
 
 ## Arquitetura
 
+A arquitetura abaixo descreve a aplicação atual. A arquitetura alvo da Fase 4 está no
+[ADR-0008](docs/adr/0008-fronteiras-e-saga-da-fase-4.md) e será entregue progressivamente.
+
 ### Componentes da aplicação
 
 O código é organizado por **bounded context** e, dentro de cada um, por camada hexagonal: o domínio
@@ -578,6 +581,7 @@ nenhuma chave privada na imagem ou no repositório.
 | [ADR-0002](docs/adr/0002-deploy-no-cluster-via-kubeconfig-de-serviceaccount.md) | Por que o deploy autentica por `ServiceAccount` e não por credencial da AWS                                          |
 | [ADR-0003](docs/adr/0003-pipeline-dividida-entre-provisionamento-e-entrega.md)  | Por que provisionamento e entrega eram workflows separados (substituído pelo ADR-0007)                                                            |
 | [ADR-0007](docs/adr/0007-quatro-repositorios-com-deploy-por-branch-e-um-cluster-para-dois-ambientes.md) | Quatro repositórios, deploy por branch e um cluster para dois ambientes
+| [ADR-0008](docs/adr/0008-fronteiras-e-saga-da-fase-4.md) | Fronteiras, comunicação e contratos planejados para a Fase 4 |
 | [WORKORDER.md](WORKORDER.md)                                                    | Fluxo detalhado da Ordem de Serviço                                                                                  |
 | [docs/MODELO-RELACIONAL.md](docs/MODELO-RELACIONAL.md)                          | Modelo relacional do schema `oficina_mecanica`                                                                       |
 | [docs/RELATORIO-VULNERABILIDADES.md](docs/RELATORIO-VULNERABILIDADES.md)        | Relatório de segurança consolidado                                                                                   |
