@@ -1,5 +1,7 @@
 # Reserva de estoque na entrada em WAITING_APPROVAL e decisão do cliente por link assinado
 
+> Para as decisões planejadas da Fase 4, veja o [ADR-0008](0008-fronteiras-e-saga-da-fase-4.md). Este registro preserva a decisão anterior.
+
 A reserva de peças passa a acontecer na entrada em `WAITING_APPROVAL`, e não mais na aprovação do
 orçamento. Enviar um orçamento é o momento em que a oficina se compromete com um preço e um prazo,
 e prometer o que não há em estoque é a falha que a mudança evita: se qualquer peça faltar, nada é
