@@ -13,9 +13,9 @@
 
 Back-end do sistema de uma oficina mecânica — 16SOAT, Tech Challenge. Construído com
 [Quarkus](https://quarkus.io/), aplica **Domain-Driven Design** sobre arquitetura hexagonal, expõe uma
-**API REST documentada (Swagger)** e cobre a gestão de **ordens de serviço, clientes, veículos,
-serviços, peças/insumos (com controle de estoque) e orçamentos**, além de um **canal público** para o
-cliente acompanhar e autorizar o serviço.
+**API REST documentada (Swagger)** para ordens de serviço, clientes, veículos e equipe. O catálogo é
+propriedade do Billing, o estoque está migrando para Execution e a criação de orçamento foi iniciada
+por eventos assíncronos; as limitações desta transição estão documentadas abaixo.
 
 A aplicação roda num **cluster EKS** com **Postgres gerenciado no RDS**, entrada pública pelo **API Gateway**, integração por **Load Balancer privado**,
 configuração em `ConfigMap`, credenciais em `Secret`, **escalabilidade automática** por consumo de CPU
@@ -25,9 +25,9 @@ descritos em [Repositórios e recursos de nuvem](#repositórios-e-recursos-de-nu
 
 Este README é sobre **arquitetura, infraestrutura e operação**. A
 referência da aplicação em si (funcionalidades, variáveis de configuração, autenticação, mapa de
-endpoints, ciclo de vida da OS, testes e build) está em **[docs/FASE-1.md](docs/FASE-1.md)**, o
-entregável da Fase 1, que continua valendo por inteiro: nada de regra de negócio ou contrato de API
-mudou aqui.
+endpoints, ciclo de vida da OS, testes e build) está em **[docs/FASE-1.md](docs/FASE-1.md)**, que
+descreve a entrega-base da Fase 1. Para os contratos alterados na transição da #109, use esta seção,
+o [fluxo atual da OS](WORKORDER.md) e o OpenAPI gerado pela aplicação.
 
 ---
 
@@ -96,19 +96,25 @@ flowchart LR
     subgraph aplicacao["Aplicação Quarkus"]
         rest["adapter/in/rest<br/>controllers · DTOs · OpenAPI"]
         casos["application<br/>services · commands · results"]
-        dominio["domain<br/>WorkOrder · Estimate · Customer · Vehicle<br/>Part · ServiceItem · Worker"]
+        dominio["domain<br/>WorkOrder · Customer · Vehicle · Worker"]
         portas["application/port/out<br/>as interfaces que a aplicação exige"]
         persistencia["adapter/out/persistence<br/>Hibernate Reactive + Panache"]
         seguranca["adapter/out/security<br/>JWT RS256 · hash de senha"]
     end
 
     banco[("PostgreSQL 16<br/>schema oficina_mecanica<br/>migrations Flyway")]
+    eventos["SNS FIFO / SQS FIFO<br/>outbox e inbox"]
+    billing["Billing<br/>catálogo e orçamento"]
+    execution["Execution<br/>estoque"]
 
     operacao --> rest
     cliente --> rest
     rest --> casos
     casos --> dominio
     casos --> portas
+    casos --> eventos
+    eventos <--> billing
+    execution -. "integração pendente" .-> eventos
     persistencia -. "implementa" .-> portas
     seguranca -. "implementa" .-> portas
     persistencia --> dominio
@@ -118,7 +124,7 @@ flowchart LR
 As setas cheias são dependência em tempo de compilação; as pontilhadas, implementação. Note que
 nenhuma sai do `domain`: é isso que o mantém livre de framework e testável sem infraestrutura.
 
-Contextos: `auth`, `customer`, `part`, `servicecatalog`, `vehicle`, `worker`, `workorder`, mais o
+Contextos: `auth`, `customer`, `vehicle`, `worker`, `workorder`, mais o
 `shared` com os utilitários transversais. As regras de dependência entre camadas não são convenção de
 revisão: são verificadas por testes de arquitetura a cada build.
 
@@ -586,3 +592,55 @@ nenhuma chave privada na imagem ou no repositório.
 
 **Event Storming, Bounded Contexts, Linguagem Ubíqua e Modelo de Dados:** board no
 [Miro](https://miro.com/app/board/uXjVHbbU2eE=/?share_link_id=577612273301).
+
+### Integração de abertura OS → Billing (transição da issue #109)
+
+A abertura responde `201` com a OS e `estimate: null`, sem esperar o Billing. Quando há
+solicitação inicial, `estimateProgress` começa em `AGUARDANDO` e, após o resultado,
+pode ser `CRIADO` ou `FALHOU`; neste último caso `estimateFailureReason` informa o motivo.
+Uma abertura sem itens também publica o evento, com listas vazias, mas não aguarda orçamento.
+Referências de catálogo inválidas não geram `404` na abertura: sua validação é responsabilidade
+do Billing. Cliente, veículo e equipe continuam validados pelo OS.
+
+| Evento | Consumidor | Ação local | Evento de saída | Compensação |
+| --- | --- | --- | --- | --- |
+| `work-order.opened` | Billing | Criar orçamento quando houver itens | `estimate.created` ou `estimate.creation-failed` | Não aplicável nesta etapa |
+| `estimate.created` | OS | Registrar resultado na inbox e marcar projeção como criada | Nenhum | Não aplicável nesta etapa |
+| `estimate.creation-failed` | OS | Registrar resultado e motivo na projeção | Nenhum | Não aplicável nesta etapa |
+
+Os [schemas e exemplos](docs/events/v1/README.md) continuam provisórios até validação conjunta.
+O Billing implementa o consumidor, o snapshot inicial, inbox/outbox e os eventos de resultado; os
+ITs de integração e o smoke Compose passaram nos checkouts em 15/11/2026. Até o contrato ser
+validado em conjunto e as mudanças serem entregues nos dois serviços, `AGUARDANDO` pode permanecer
+sem resultado.
+Não há provisionamento AWS ou deploy nesta mudança.
+
+O Compose lê o checkout do Billing em `../oficina-billing` por padrão; `BILLING_SOURCE` altera
+esse caminho. Há um PostgreSQL para cada serviço, LocalStack para SNS/SQS e um gateway em
+`http://localhost:8080`. O gateway encaminha `/admin/services` e `/admin/parts` ao Billing;
+`GET /admin/parts/low-stock` e `PATCH /admin/parts/{id}/stock` são encaminhados ao OS,
+que verifica autorização e responde `503` com `LEGACY_FLOW_UNAVAILABLE` enquanto o estoque não é
+integrado. O consumidor e o publicador do OS recebem configuração local via Compose; para execução
+fora dele, configure `APP_EVENTS_SNS_TOPIC_ARN`, `APP_EVENTS_SNS_ENDPOINT`,
+`APP_EVENTS_SQS_QUEUE_URL`, `APP_EVENTS_SQS_ENDPOINT` e `APP_EVENTS_AWS_REGION`, além das
+credenciais AWS apropriadas ao ambiente. Sem os endereços, os workers permanecem desativados.
+
+Durante a transição, o OS responde `503` com `LEGACY_FLOW_UNAVAILABLE` nas operações que
+dependem do orçamento e estoque locais:
+
+- `POST /v1/work-orders/{id}/estimate`;
+- `PATCH /v1/work-orders/{id}/estimate/{estimateId}/approve` e `/reject`;
+- `POST /v1/work-orders/{id}/services` e `PATCH /v1/work-orders/{id}/close`;
+- `PATCH /v1/work-orders/{id}/status` para `WAITING_APPROVAL`, `IN_PROGRESS`, `COMPLETED` e `DELIVERED`;
+- `PATCH /v1/me/work-orders/{id}/estimate/{estimateId}/approve` e `/reject`;
+- `POST /v1/public/work-orders/estimate-decisions/{token}`;
+- `GET /admin/parts/low-stock` e `PATCH /admin/parts/{id}/stock`.
+
+A abertura, as consultas e a transição para `DIAGNOSIS` permanecem disponíveis. Os bloqueios
+administrativos e do cliente respeitam a autorização; a decisão por link permanece pública.
+
+O código e as rotas administrativas locais de catálogo foram removidos. A migration
+`V5__remove_local_catalog.sql` elimina as tabelas `parts` e `service_item`, remove as FKs que as
+referenciam e preserva os IDs históricos nos registros de orçamento antigos. A #109 segue
+parcialmente atendida até o time validar o contrato provisório. As operações legadas listadas acima
+continuam indisponíveis enquanto os fluxos de orçamento real e estoque não forem integrados.

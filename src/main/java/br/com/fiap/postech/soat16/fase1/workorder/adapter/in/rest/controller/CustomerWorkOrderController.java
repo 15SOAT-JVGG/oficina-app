@@ -17,6 +17,7 @@ import jakarta.ws.rs.core.MediaType;
 
 import org.eclipse.microprofile.jwt.JsonWebToken;
 
+import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.exception.LegacyFlowUnavailable;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.pagination.PageableRequestDto;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.pagination.PageableResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.WorkOrderRestMapper;
@@ -67,8 +68,8 @@ public class CustomerWorkOrderController implements CustomerWorkOrderControllerD
     @Override
     public Uni<EstimateResponseDto> approveMyEstimate(@PathParam("id") UUID id,
                                                        @PathParam("estimateId") UUID estimateId) {
-        return service.approveCustomerEstimate(authenticatedCustomerId(), id, estimateId)
-                .map(WorkOrderRestMapper::toResponse);
+        authenticatedCustomerId();
+        return LegacyFlowUnavailable.response();
     }
 
     @PATCH
@@ -77,8 +78,8 @@ public class CustomerWorkOrderController implements CustomerWorkOrderControllerD
     @Override
     public Uni<EstimateResponseDto> rejectMyEstimate(@PathParam("id") UUID id,
                                                       @PathParam("estimateId") UUID estimateId) {
-        return service.rejectCustomerEstimate(authenticatedCustomerId(), id, estimateId)
-                .map(WorkOrderRestMapper::toResponse);
+        authenticatedCustomerId();
+        return LegacyFlowUnavailable.response();
     }
 
     private UUID authenticatedCustomerId() {

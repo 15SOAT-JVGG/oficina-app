@@ -69,10 +69,10 @@ services:
         condition: service_healthy
       jwt-keys:
         condition: service_completed_successfully
+      localstack:
+        condition: service_healthy
     volumes:
       - jwt_keys:/etc/jwt:ro
-    ports:
-      - "8080:8080"
     environment:
       # Conexão com o banco (host = nome do serviço/container na rede do Compose)
       INFRA_HOST_POSTGRES: oficina-mecanica-postgres
@@ -87,6 +87,92 @@ services:
       # Par RS256 gerado pelo serviço jwt-keys e montado em /etc/jwt (uso local/demo).
       JWT_PRIVATE_KEY_LOCATION: ${JWT_PRIVATE_KEY_LOCATION:-file:/etc/jwt/privateKey.pem}
       JWT_PUBLIC_KEY_LOCATION: ${JWT_PUBLIC_KEY_LOCATION:-file:/etc/jwt/publicKey.pem}
+      APP_EVENTS_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:os-events.fifo
+      APP_EVENTS_SNS_ENDPOINT: http://localstack:4566
+      APP_EVENTS_SQS_QUEUE_URL: http://localstack:4566/queue/us-east-1/000000000000/os-events.fifo
+      APP_EVENTS_SQS_ENDPOINT: http://localstack:4566
+      APP_EVENTS_AWS_REGION: us-east-1
+      APP_EVENTS_AWS_ENDPOINT: http://localstack:4566
+      APP_EVENTS_AWS_SQS_QUEUE_URL: http://localstack:4566/queue/us-east-1/000000000000/billing-events.fifo
+      APP_EVENTS_AWS_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:billing-events.fifo
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    networks:
+      - oficina_mecanica_net
+
+
+  localstack:
+    image: localstack/localstack:3.8
+    environment:
+      SERVICES: sns,sqs
+      AWS_DEFAULT_REGION: us-east-1
+      SQS_ENDPOINT_STRATEGY: path
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./infra/localstack/setup-events.sh:/etc/localstack/init/ready.d/setup-events.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/oficina-events-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      - oficina_mecanica_net
+
+  billing-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${BILLING_POSTGRES_USERNAME:-billing}
+      POSTGRES_PASSWORD: ${BILLING_POSTGRES_PASSWORD:-billing}
+      POSTGRES_DB: ${BILLING_POSTGRES_DB:-oficina_billing}
+    volumes:
+      - billing_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${BILLING_POSTGRES_USERNAME:-billing} -d ${BILLING_POSTGRES_DB:-oficina_billing}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - oficina_mecanica_net
+
+  billing:
+    build:
+      context: ${BILLING_SOURCE:-../oficina-billing}
+      dockerfile: infra/docker/Dockerfile
+    image: oficina-billing:local
+    depends_on:
+      billing-postgres:
+        condition: service_healthy
+      jwt-keys:
+        condition: service_completed_successfully
+    volumes:
+      - jwt_keys:/etc/jwt:ro
+    environment:
+      POSTGRES_HOST: billing-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${BILLING_POSTGRES_DB:-oficina_billing}
+      POSTGRES_USERNAME: ${BILLING_POSTGRES_USERNAME:-billing}
+      POSTGRES_PASSWORD: ${BILLING_POSTGRES_PASSWORD:-billing}
+      JWT_ISSUER: oficina-api
+      JWT_PUBLIC_KEY_LOCATION: file:/etc/jwt/publicKey.pem
+      APP_EVENTS_AWS_REGION: us-east-1
+      APP_EVENTS_AWS_ENDPOINT: http://localstack:4566
+      APP_EVENTS_AWS_SQS_QUEUE_URL: http://localstack:4566/queue/us-east-1/000000000000/billing-events.fifo
+      APP_EVENTS_AWS_SNS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:billing-events.fifo
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    networks:
+      - oficina_mecanica_net
+
+  gateway:
+    image: nginx:1.29-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+      - billing
     networks:
       - oficina_mecanica_net
 
@@ -96,4 +182,5 @@ networks:
 
 volumes:
   postgres_data:
+  billing_postgres_data:
   jwt_keys:

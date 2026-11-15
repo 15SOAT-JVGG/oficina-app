@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -31,13 +30,8 @@ import org.junit.jupiter.api.Test;
 import br.com.fiap.postech.soat16.fase1.customer.adapter.out.persistence.CustomerRepository;
 import br.com.fiap.postech.soat16.fase1.customer.domain.model.Customer;
 import br.com.fiap.postech.soat16.fase1.customer.domain.model.enums.DocumentType;
-import br.com.fiap.postech.soat16.fase1.part.adapter.out.persistence.PartRepository;
-import br.com.fiap.postech.soat16.fase1.part.domain.model.Part;
-import br.com.fiap.postech.soat16.fase1.servicecatalog.adapter.out.persistence.ServiceItemRepository;
-import br.com.fiap.postech.soat16.fase1.servicecatalog.domain.model.ServiceItem;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.dto.ApiErrorResponseDto;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.pagination.PageableResponseDto;
-import br.com.fiap.postech.soat16.fase1.shared.domain.exception.ErrorType;
 import br.com.fiap.postech.soat16.fase1.shared.test.infrastructure.JwtKeyPairTestResource;
 import br.com.fiap.postech.soat16.fase1.shared.test.infrastructure.PostgresTestResource;
 import br.com.fiap.postech.soat16.fase1.vehicle.adapter.out.persistence.VehicleRepository;
@@ -46,19 +40,18 @@ import br.com.fiap.postech.soat16.fase1.vehicle.domain.model.enums.VehicleType;
 import br.com.fiap.postech.soat16.fase1.worker.adapter.out.persistence.WorkerRepository;
 import br.com.fiap.postech.soat16.fase1.worker.domain.model.Worker;
 import br.com.fiap.postech.soat16.fase1.worker.domain.model.enums.WorkerProfile;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.EstimateResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.OpenedWorkOrderResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderMetricsResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderResponseDto;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderServiceResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderTrackingResponseDto;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.out.persistence.EstimateDecisionTokenRepository;
+import br.com.fiap.postech.soat16.fase1.workorder.adapter.out.integration.EstimateResultJournal;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.out.persistence.WorkOrderRepository;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.out.security.JwtWorkOrderTrackingTokenAdapter;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.WorkOrderTrackingToken;
-import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.EstimateStatus;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderStatus;
+import br.com.fiap.postech.soat16.fase1.workorder.domain.model.integration.EstimateProjection;
 
+import io.agroal.api.AgroalDataSource;
 import io.quarkus.hibernate.reactive.panache.Panache;
 import io.quarkus.mailer.MockMailbox;
 import io.quarkus.test.common.QuarkusTestResource;
@@ -85,16 +78,13 @@ class WorkOrderControllerIT {
     MockMailbox mailbox;
 
     @Inject
+    AgroalDataSource dataSource;
+
+    @Inject
     CustomerRepository customerRepository;
 
     @Inject
     VehicleRepository vehicleRepository;
-
-    @Inject
-    PartRepository partRepository;
-
-    @Inject
-    ServiceItemRepository serviceItemRepository;
 
     @Inject
     WorkerRepository workerRepository;
@@ -103,7 +93,7 @@ class WorkOrderControllerIT {
     WorkOrderRepository workOrderRepository;
 
     @Inject
-    EstimateDecisionTokenRepository decisionTokenRepository;
+    EstimateResultJournal resultJournal;
 
     // Esperar trinta dias não é uma opção, então o link vencido é assinado pelo próprio adaptador.
     @Inject
@@ -160,9 +150,6 @@ class WorkOrderControllerIT {
 
     // O mailer roda em modo simulado nos testes, então a caixa de entrada é a única forma de
     // observar exatamente o que o cliente recebeu — inclusive os links que ele vai clicar.
-    private List<String> decisionLinks(String customerEmail) {
-        return emailedLinks(customerEmail, DECISION_LINK_MARKER);
-    }
 
     private List<String> trackingLinks(String customerEmail) {
         return emailedLinks(customerEmail, TRACKING_LINK_MARKER);
@@ -195,20 +182,7 @@ class WorkOrderControllerIT {
         return persistInTransaction(() -> workerRepository.save(worker)).getId();
     }
 
-    private UUID seedPart(BigDecimal unitPrice) {
-        Part part = new Part("Filtro de óleo", "Filtro de óleo padrão", unitPrice, 100, "UN");
-        return persistInTransaction(() -> partRepository.save(part)).getId();
-    }
 
-    private UUID seedServiceItem(BigDecimal basePrice) {
-        ServiceItem serviceItem = new ServiceItem();
-        serviceItem.setName("Alinhamento e balanceamento");
-        serviceItem.setDescription("Serviço padrão de suspensão");
-        serviceItem.setBasePrice(basePrice);
-        serviceItem.setEstimatedDurationMinutes(60);
-        serviceItem.setActive(true);
-        return persistInTransaction(() -> serviceItemRepository.save(serviceItem)).getId();
-    }
 
     private OpenedWorkOrderResponseDto openWorkOrder(String body) {
         return given()
@@ -281,60 +255,13 @@ class WorkOrderControllerIT {
                 .statusCode(200);
     }
 
-    private EstimateResponseDto createEstimate(UUID workOrderId, UUID partId, int quantity) {
-        String body = """
-                {"items":[{"partId":"%s","quantity":%d}]}
-                """.formatted(partId, quantity);
 
-        return given()
-                .contentType("application/json")
-                .body(body)
-        .when()
-                .post(WORK_ORDERS_PATH + "/" + workOrderId + "/estimate")
-        .then()
-                .statusCode(201)
-                .extract().as(EstimateResponseDto.class);
-    }
 
-    private EstimateResponseDto approveEstimate(UUID workOrderId, UUID estimateId) {
-        return given()
-        .when()
-                .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/estimate/" + estimateId + "/approve")
-        .then()
-                .statusCode(200)
-                .extract().as(EstimateResponseDto.class);
-    }
 
-    private EstimateResponseDto rejectEstimate(UUID workOrderId, UUID estimateId) {
-        return given()
-        .when()
-                .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/estimate/" + estimateId + "/reject")
-        .then()
-                .statusCode(200)
-                .extract().as(EstimateResponseDto.class);
-    }
-
-    private WorkOrderServiceResponseDto addService(UUID workOrderId, String description, BigDecimal price) {
-        return given()
-                .contentType("application/json")
-                .body("{\"description\":\"%s\",\"price\":%s}".formatted(description, price))
-        .when()
-                .post(WORK_ORDERS_PATH + "/" + workOrderId + "/services")
-        .then()
-                .statusCode(201)
-                .extract().as(WorkOrderServiceResponseDto.class);
-    }
 
     // Lê o estoque atual da peça direto do repositório (estabelecendo o contexto Vert.x exigido
     // pelo Hibernate Reactive), já que não há endpoint de leitura de peça neste teste.
-    private int stockOf(UUID partId) {
-        return persistInTransaction(() -> partRepository.find("id = ?1", partId).firstResult()).getStockQuantity();
-    }
 
-    private void repricePart(UUID partId, BigDecimal unitPrice) {
-        persistInTransaction(() -> partRepository.find("id = ?1", partId).firstResult()
-                .invoke(entity -> entity.setUnitPrice(unitPrice)));
-    }
 
     // A API não permite escolher a data de abertura, então a fila só pode ser exercitada por data
     // retroagindo a OS direto na base.
@@ -343,23 +270,7 @@ class WorkOrderControllerIT {
                 .invoke(entity -> entity.setOpenedAt(entity.getOpenedAt().minus(age))));
     }
 
-    private void repriceServiceItem(UUID serviceItemId, BigDecimal basePrice) {
-        persistInTransaction(() -> serviceItemRepository.find("id = ?1", serviceItemId).firstResult()
-                .invoke(entity -> entity.setBasePrice(basePrice)));
-    }
 
-    private UUID createWorkOrderInProgress(BigDecimal unitPrice, int quantity) {
-        UUID customerId = seedCustomer();
-        UUID vehicleId = seedVehicle();
-        UUID partId = seedPart(unitPrice);
-        UUID workOrderId = createWorkOrder(customerId, vehicleId);
-
-        updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-        EstimateResponseDto estimate = createEstimate(workOrderId, partId, quantity);
-        approveEstimate(workOrderId, estimate.estimateId());
-
-        return workOrderId;
-    }
 
     private ApiErrorResponseDto extractError(Response response) {
         return response.as(ApiErrorResponseDto.class);
@@ -369,60 +280,7 @@ class WorkOrderControllerIT {
     @DisplayName("Fluxo completo da ordem de serviço")
     class FullLifecycle {
 
-        @Test
-        @DisplayName("deve percorrer RECEIVED -> DIAGNOSIS -> WAITING_APPROVAL -> IN_PROGRESS -> COMPLETED -> DELIVERED")
-        void shouldCompleteFullLifecycle() {
-            UUID customerId = seedCustomer();
-            UUID vehicleId = seedVehicle();
-            UUID partId = seedPart(new BigDecimal("150.00"));
 
-            UUID workOrderId = createWorkOrder(customerId, vehicleId);
-
-            WorkOrderResponseDto created = getWorkOrder(workOrderId);
-            assertEquals(WorkOrderStatus.RECEIVED, created.status());
-            assertNotNull(created.openedAt());
-            assertNull(created.closedAt());
-
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            assertEquals(WorkOrderStatus.DIAGNOSIS, getWorkOrder(workOrderId).status());
-
-            EstimateResponseDto estimate = createEstimate(workOrderId, partId, 2);
-            assertEquals(WorkOrderStatus.WAITING_APPROVAL, getWorkOrder(workOrderId).status());
-            assertEquals(EstimateStatus.PENDING, estimate.status());
-            assertEquals(0, new BigDecimal("300.00").compareTo(estimate.totalAmount()));
-
-            EstimateResponseDto approved = approveEstimate(workOrderId, estimate.estimateId());
-            assertEquals(EstimateStatus.APPROVED, approved.status());
-
-            WorkOrderResponseDto afterApproval = getWorkOrder(workOrderId);
-            assertEquals(WorkOrderStatus.IN_PROGRESS, afterApproval.status());
-            assertEquals(0, new BigDecimal("300.00").compareTo(afterApproval.estimatedValue()));
-
-            WorkOrderServiceResponseDto service = given()
-                    .contentType("application/json")
-                    .body("{\"description\":\"Troca de óleo\",\"price\":120.00}")
-            .when()
-                    .post(WORK_ORDERS_PATH + "/" + workOrderId + "/services")
-            .then()
-                    .statusCode(201)
-                    .extract().as(WorkOrderServiceResponseDto.class);
-            assertEquals("Troca de óleo", service.description());
-
-            WorkOrderResponseDto closed = given()
-                    .contentType("application/json")
-                    .body("{\"finalValue\":410.50}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/close")
-            .then()
-                    .statusCode(200)
-                    .extract().as(WorkOrderResponseDto.class);
-            assertEquals(WorkOrderStatus.COMPLETED, closed.status());
-            assertEquals(0, new BigDecimal("410.50").compareTo(closed.finalValue()));
-            assertNotNull(closed.closedAt());
-
-            updateStatus(workOrderId, WorkOrderStatus.DELIVERED);
-            assertEquals(WorkOrderStatus.DELIVERED, getWorkOrder(workOrderId).status());
-        }
 
         @Test
         @DisplayName("deve rejeitar o status CANCELLED removido do contrato")
@@ -438,32 +296,7 @@ class WorkOrderControllerIT {
                     .statusCode(400);
         }
 
-        @Test
-        @DisplayName("deve travar a ordem para qualquer alteração depois de DELIVERED")
-        void shouldLockWorkOrderAfterDelivered() {
-            UUID workOrderId = createWorkOrderInProgress(new BigDecimal("200.00"), 1);
 
-            given()
-                    .contentType("application/json")
-                    .body("{}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/close")
-            .then()
-                    .statusCode(200);
-
-            updateStatus(workOrderId, WorkOrderStatus.DELIVERED);
-
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body("{\"status\":\"DIAGNOSIS\"}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/status")
-            .then()
-                    .statusCode(422)
-                    .extract().response());
-            assertEquals(ErrorType.BUSINESS, error.type());
-            assertEquals("WORK_ORDER_LOCKED", error.code());
-        }
     }
 
     @Nested
@@ -505,143 +338,76 @@ class WorkOrderControllerIT {
         }
 
         @Test
-        @DisplayName("deve abrir a ordem e o orçamento pendente da solicitação inicial em uma única chamada")
-        void shouldOpenWorkOrderWithInitialPendingEstimate() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            UUID serviceItemId = seedServiceItem(new BigDecimal("120.00"));
-            String body = """
-                    {"customerId":"%s","vehicleId":"%s","description":"Revisão dos 10.000km",
-                     "services":[{"serviceItemId":"%s"}],
-                     "parts":[{"partId":"%s","quantity":3}]}
-                    """.formatted(seedCustomer(), seedVehicle(), serviceItemId, partId);
-
-            OpenedWorkOrderResponseDto opened = openWorkOrder(body);
-
-            assertEquals(WorkOrderStatus.RECEIVED, opened.workOrder().status());
-            EstimateResponseDto estimate = opened.estimate();
-            assertNotNull(estimate);
-            assertEquals(EstimateStatus.PENDING, estimate.status());
-            assertEquals(opened.workOrder().workOrderId(), estimate.workOrderId());
-            assertEquals(0, new BigDecimal("150.00").compareTo(estimate.partsAmount()));
-            assertEquals(0, new BigDecimal("120.00").compareTo(estimate.laborAmount()));
-            assertEquals(0, new BigDecimal("270.00").compareTo(estimate.totalAmount()));
-            assertEquals(1, estimate.items().size());
-            assertEquals(0, new BigDecimal("50.00").compareTo(estimate.items().get(0).unitPrice()));
-
-            WorkOrderResponseDto persisted = getWorkOrder(opened.workOrder().workOrderId());
-            assertEquals(0, new BigDecimal("270.00").compareTo(persisted.estimatedValue()));
-        }
-
-        @Test
-        @DisplayName("deve manter os preços do orçamento inalterados quando o catálogo é atualizado depois")
-        void shouldKeepEstimatePricesAfterCatalogUpdate() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            UUID serviceItemId = seedServiceItem(new BigDecimal("120.00"));
+        @DisplayName("abre a OS com referências ainda não validadas e expõe o orçamento aguardando")
+        void opensWithInitialRequestWithoutCatalogValidation() {
+            UUID partId = UUID.randomUUID();
+            UUID serviceId = UUID.randomUUID();
             String body = """
                     {"customerId":"%s","vehicleId":"%s","description":"Revisão",
-                     "services":[{"serviceItemId":"%s"}],
-                     "parts":[{"partId":"%s","quantity":1}]}
-                    """.formatted(seedCustomer(), seedVehicle(), serviceItemId, partId);
-
+                     "services":[{"serviceItemId":"%s"}],"parts":[{"partId":"%s","quantity":3}]}
+                    """.formatted(seedCustomer(), seedVehicle(), serviceId, partId);
             OpenedWorkOrderResponseDto opened = openWorkOrder(body);
-            UUID workOrderId = opened.workOrder().workOrderId();
-
-            repricePart(partId, new BigDecimal("999.00"));
-            repriceServiceItem(serviceItemId, new BigDecimal("999.00"));
-
-            assertEquals(0, new BigDecimal("170.00").compareTo(getWorkOrder(workOrderId).estimatedValue()));
-
-            // A aprovação relê o orçamento gravado, expondo o preço unitário efetivamente persistido.
-            EstimateResponseDto persisted = approveEstimate(workOrderId, opened.estimate().estimateId());
-            assertEquals(0, new BigDecimal("50.00").compareTo(persisted.items().get(0).unitPrice()));
-            assertEquals(0, new BigDecimal("120.00").compareTo(persisted.laborAmount()));
-            assertEquals(0, new BigDecimal("170.00").compareTo(persisted.totalAmount()));
+            assertNull(opened.estimate());
+            assertEquals(EstimateProjection.Status.AGUARDANDO, opened.workOrder().estimateProgress());
+            assertEquals(EstimateProjection.Status.AGUARDANDO,
+                    getWorkOrder(opened.workOrder().workOrderId()).estimateProgress());
+            Object[] journal = persistInTransaction(() -> Panache.getSession().flatMap(session -> session
+                    .createNativeQuery("""
+                            SELECT CAST(o.payload AS text), p.status FROM oficina_mecanica.work_order_outbox o
+                            JOIN oficina_mecanica.work_order_estimate_projection p ON p.opening_event_id = o.event_id
+                            WHERE o.work_order_id = :id
+                            """, Object[].class).setParameter("id", opened.workOrder().workOrderId()).getSingleResult()));
+            assertTrue(((String) journal[0]).contains(partId.toString()));
+            assertTrue(((String) journal[0]).contains(serviceId.toString()));
+            assertEquals("AGUARDANDO", journal[1]);
         }
 
         @Test
-        @DisplayName("deve reverter as linhas de serviço já gravadas quando uma peça seguinte é inválida")
-        void shouldRollbackPersistedServicesWhenAPartIsInvalid() {
+        @DisplayName("reverte a abertura quando o registro do evento falha")
+        void rollsBackOpeningWhenJournalFails() throws Exception {
             UUID vehicleId = seedVehicle();
             String body = """
-                    {"customerId":"%s","vehicleId":"%s","description":"Revisão",
-                     "services":[{"serviceItemId":"%s"}],
-                     "parts":[{"partId":"%s","quantity":1}]}
-                    """.formatted(seedCustomer(), vehicleId,
-                    seedServiceItem(new BigDecimal("120.00")), UUID.randomUUID());
-
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body(body)
-            .when()
-                    .post(WORK_ORDERS_PATH)
-            .then()
-                    .statusCode(404)
-                    .extract().response());
-
-            assertEquals("ESTIMATE_PART_NOT_FOUND", error.code());
-            assertFalse(workOrderExistsForVehicle(vehicleId));
+                    {"customerId":"%s","vehicleId":"%s","description":"Revisão"}
+                    """.formatted(seedCustomer(), vehicleId);
+            try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE FUNCTION oficina_mecanica.test_reject_outbox() RETURNS trigger
+                        LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test outbox failure'; END $$
+                        """);
+                statement.execute("""
+                        CREATE TRIGGER test_reject_outbox BEFORE INSERT ON oficina_mecanica.work_order_outbox
+                        FOR EACH ROW EXECUTE FUNCTION oficina_mecanica.test_reject_outbox()
+                        """);
+                try {
+                    given().contentType("application/json").body(body)
+                            .when().post(WORK_ORDERS_PATH).then().statusCode(500);
+                    assertFalse(workOrderExistsForVehicle(vehicleId));
+                } finally {
+                    statement.execute("DROP TRIGGER test_reject_outbox ON oficina_mecanica.work_order_outbox");
+                    statement.execute("DROP FUNCTION oficina_mecanica.test_reject_outbox()");
+                }
+            }
         }
 
         @Test
-        @DisplayName("deve gravar todos os serviços quando a solicitação inicial traz vários itens de catálogo")
-        void shouldOpenWorkOrderWithSeveralRequestedServices() {
-            String body = """
-                    {"customerId":"%s","vehicleId":"%s","description":"Revisão",
-                     "services":[{"serviceItemId":"%s"},{"serviceItemId":"%s"},{"serviceItemId":"%s"}]}
-                    """.formatted(seedCustomer(), seedVehicle(),
-                    seedServiceItem(new BigDecimal("120.00")),
-                    seedServiceItem(new BigDecimal("80.50")),
-                    seedServiceItem(new BigDecimal("40.00")));
-
-            OpenedWorkOrderResponseDto opened = openWorkOrder(body);
-
-            assertEquals(0, new BigDecimal("240.50").compareTo(opened.estimate().laborAmount()));
-            assertEquals(0, BigDecimal.ZERO.compareTo(opened.estimate().partsAmount()));
-            assertEquals(0, new BigDecimal("240.50").compareTo(opened.estimate().totalAmount()));
-        }
-
-        @Test
-        @DisplayName("deve retornar 404 e não abrir a ordem quando o item de serviço não existe")
-        void shouldReturn404WhenServiceItemNotFound() {
-            UUID vehicleId = seedVehicle();
-            String body = """
-                    {"customerId":"%s","vehicleId":"%s","description":"Revisão",
-                     "services":[{"serviceItemId":"%s"}]}
-                    """.formatted(seedCustomer(), vehicleId, UUID.randomUUID());
-
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body(body)
-            .when()
-                    .post(WORK_ORDERS_PATH)
-            .then()
-                    .statusCode(404)
-                    .extract().response());
-
-            assertEquals("SERVICE_ITEM_NOT_FOUND", error.code());
-            assertFalse(workOrderExistsForVehicle(vehicleId));
-        }
-
-        @Test
-        @DisplayName("deve retornar 404 e não abrir a ordem quando a peça não existe")
-        void shouldReturn404WhenRequestedPartNotFound() {
-            UUID vehicleId = seedVehicle();
+        @DisplayName("expõe a falha recebida para uma solicitação inicial")
+        void exposesEstimateFailure() throws Throwable {
             String body = """
                     {"customerId":"%s","vehicleId":"%s","description":"Revisão",
                      "parts":[{"partId":"%s","quantity":1}]}
-                    """.formatted(seedCustomer(), vehicleId, UUID.randomUUID());
-
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body(body)
-            .when()
-                    .post(WORK_ORDERS_PATH)
-            .then()
-                    .statusCode(404)
-                    .extract().response());
-
-            assertEquals("ESTIMATE_PART_NOT_FOUND", error.code());
-            assertFalse(workOrderExistsForVehicle(vehicleId));
+                    """.formatted(seedCustomer(), seedVehicle(), UUID.randomUUID());
+            UUID order = openWorkOrder(body).workOrder().workOrderId();
+            Object[] ids = persistInTransaction(() -> Panache.getSession().flatMap(session -> session
+                    .createNativeQuery("""
+                            SELECT opening_event_id, saga_id, correlation_id
+                            FROM oficina_mecanica.work_order_estimate_projection WHERE work_order_id = :id
+                            """, Object[].class).setParameter("id", order).getSingleResult()));
+            var event = new EstimateResultJournal.Event(UUID.randomUUID(), order, (UUID) ids[0],
+                    (UUID) ids[1], (UUID) ids[2], null, null, "PART_NOT_FOUND", "Peça não encontrada");
+            VertxContextSupport.subscribeAndAwait(() -> resultJournal.record(event));
+            WorkOrderResponseDto result = getWorkOrder(order);
+            assertEquals(EstimateProjection.Status.FALHOU, result.estimateProgress());
+            assertEquals("Peça não encontrada", result.estimateFailureReason());
         }
 
         @Test
@@ -651,7 +417,7 @@ class WorkOrderControllerIT {
             String body = """
                     {"customerId":"%s","vehicleId":"%s","description":"Revisão",
                      "parts":[{"partId":"%s","quantity":0}]}
-                    """.formatted(seedCustomer(), vehicleId, seedPart(new BigDecimal("50.00")));
+                    """.formatted(seedCustomer(), vehicleId, UUID.randomUUID());
 
             given()
                     .contentType("application/json")
@@ -787,93 +553,20 @@ class WorkOrderControllerIT {
                     .extract().response();
         }
 
-        @Test
-        @DisplayName("deve rejeitar pular de RECEIVED para IN_PROGRESS")
-        void shouldRejectSkippingCanonicalStages() {
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
 
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body("{\"status\":\"IN_PROGRESS\"}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/status")
-            .then()
-                    .statusCode(422)
-                    .extract().response());
 
-            assertEquals("INVALID_STATUS_TRANSITION", error.code());
-        }
 
-        @Test
-        @DisplayName("deve rejeitar ir direto para COMPLETED pelo endpoint genérico")
-        void shouldRejectCompletedViaGenericEndpoint() {
-            UUID workOrderId = createWorkOrderInProgress(new BigDecimal("100.00"), 1);
 
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body("{\"status\":\"COMPLETED\"}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/status")
-            .then()
-                    .statusCode(422)
-                    .extract().response());
-            assertEquals("INVALID_STATUS_TRANSITION", error.code());
-        }
 
-        @Test
-        @DisplayName("deve rejeitar aprovar sem orçamento aprovado")
-        void shouldRejectApprovingWithoutApprovedEstimate() {
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            createEstimate(workOrderId, seedPart(new BigDecimal("50.00")), 1);
-
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body("{\"status\":\"IN_PROGRESS\"}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/status")
-            .then()
-                    .statusCode(422)
-                    .extract().response());
-            assertEquals("ESTIMATE_NOT_APPROVED", error.code());
-        }
     }
 
     @Nested
     @DisplayName("POST /v1/work-orders/{id}/estimate — createEstimate")
     class CreateEstimate {
 
-        @Test
-        @DisplayName("deve criar o orçamento com total calculado a partir dos itens")
-        void shouldCreateEstimate() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
 
-            EstimateResponseDto estimate = createEstimate(workOrderId, partId, 3);
 
-            assertEquals(EstimateStatus.PENDING, estimate.status());
-            assertEquals(0, new BigDecimal("150.00").compareTo(estimate.totalAmount()));
-            assertEquals(1, estimate.items().size());
-        }
 
-        @Test
-        @DisplayName("deve retornar 404 quando a peça não existe")
-        void shouldReturn404WhenPartNotFound() {
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            String body = """
-                    {"items":[{"partId":"%s","quantity":1}]}
-                    """.formatted(UUID.randomUUID());
-
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body(body)
-            .when()
-                    .post(WORK_ORDERS_PATH + "/" + workOrderId + "/estimate")
-            .then()
-                    .statusCode(404)
-                    .extract().response());
-            assertEquals("ESTIMATE_PART_NOT_FOUND", error.code());
-        }
 
         @Test
         @DisplayName("deve retornar 400 quando a lista de itens está vazia")
@@ -895,75 +588,18 @@ class WorkOrderControllerIT {
     @DisplayName("PATCH /v1/work-orders/{id}/estimate/{estimateId}/approve — approveEstimate")
     class ApproveEstimate {
 
-        @Test
-        @DisplayName("deve aprovar o orçamento e avançar a ordem para IN_PROGRESS")
-        void shouldApproveAndAdvanceStatus() {
-            UUID partId = seedPart(new BigDecimal("80.00"));
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            EstimateResponseDto estimate = createEstimate(workOrderId, partId, 1);
 
-            EstimateResponseDto approved = approveEstimate(workOrderId, estimate.estimateId());
 
-            assertEquals(EstimateStatus.APPROVED, approved.status());
-            assertNotNull(approved.approvedAt());
-            assertEquals(WorkOrderStatus.IN_PROGRESS, getWorkOrder(workOrderId).status());
-        }
 
-        @Test
-        @DisplayName("deve retornar 404 quando o orçamento não existe")
-        void shouldReturn404WhenEstimateNotFound() {
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
 
-            ApiErrorResponseDto error = extractError(given()
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/estimate/" + UUID.randomUUID() + "/approve")
-            .then()
-                    .statusCode(404)
-                    .extract().response());
-            assertEquals("ESTIMATE_NOT_FOUND", error.code());
-        }
 
-        @Test
-        @DisplayName("deve retornar 409 quando o orçamento já foi decidido")
-        void shouldReturn409WhenAlreadyDecided() {
-            UUID partId = seedPart(new BigDecimal("80.00"));
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            EstimateResponseDto estimate = createEstimate(workOrderId, partId, 1);
-            approveEstimate(workOrderId, estimate.estimateId());
-
-            ApiErrorResponseDto error = extractError(given()
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/estimate/" + estimate.estimateId() + "/approve")
-            .then()
-                    .statusCode(409)
-                    .extract().response());
-            assertEquals("ESTIMATE_ALREADY_DECIDED", error.code());
-        }
     }
 
     @Nested
     @DisplayName("POST /v1/work-orders/{id}/services — addService")
     class AddService {
 
-        @Test
-        @DisplayName("deve registrar uma linha de mão de obra")
-        void shouldAddService() {
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
 
-            WorkOrderServiceResponseDto service = given()
-                    .contentType("application/json")
-                    .body("{\"description\":\"Alinhamento\",\"price\":80.00}")
-            .when()
-                    .post(WORK_ORDERS_PATH + "/" + workOrderId + "/services")
-            .then()
-                    .statusCode(201)
-                    .extract().as(WorkOrderServiceResponseDto.class);
-
-            assertEquals("Alinhamento", service.description());
-            assertEquals(0, new BigDecimal("80.00").compareTo(service.price()));
-        }
 
         @Test
         @DisplayName("deve retornar 400 quando o preço é zero")
@@ -985,56 +621,11 @@ class WorkOrderControllerIT {
     @DisplayName("PATCH /v1/work-orders/{id}/close — close")
     class Close {
 
-        @Test
-        @DisplayName("deve usar o valor do orçamento aprovado quando finalValue é omitido")
-        void shouldCloseUsingEstimatedValueWhenOmitted() {
-            UUID workOrderId = createWorkOrderInProgress(new BigDecimal("150.00"), 2);
 
-            WorkOrderResponseDto closed = given()
-                    .contentType("application/json")
-                    .body("{}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/close")
-            .then()
-                    .statusCode(200)
-                    .extract().as(WorkOrderResponseDto.class);
 
-            assertEquals(WorkOrderStatus.COMPLETED, closed.status());
-            assertEquals(0, new BigDecimal("300.00").compareTo(closed.finalValue()));
-        }
 
-        @Test
-        @DisplayName("deve usar o finalValue informado quando presente")
-        void shouldCloseUsingProvidedFinalValue() {
-            UUID workOrderId = createWorkOrderInProgress(new BigDecimal("150.00"), 2);
 
-            WorkOrderResponseDto closed = given()
-                    .contentType("application/json")
-                    .body("{\"finalValue\":350.00}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/close")
-            .then()
-                    .statusCode(200)
-                    .extract().as(WorkOrderResponseDto.class);
 
-            assertEquals(0, new BigDecimal("350.00").compareTo(closed.finalValue()));
-        }
-
-        @Test
-        @DisplayName("deve retornar 422 quando a ordem não está IN_PROGRESS")
-        void shouldReturn422WhenNotInProgress() {
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body("{}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/close")
-            .then()
-                    .statusCode(422)
-                    .extract().response());
-            assertEquals("INVALID_STATUS_TRANSITION", error.code());
-        }
 
         @Test
         @DisplayName("deve retornar 400 quando finalValue é zero")
@@ -1055,143 +646,21 @@ class WorkOrderControllerIT {
     @DisplayName("Orçamento (peças + serviços), rejeição e estoque")
     class EstimateDecisionAndStock {
 
-        @Test
-        @DisplayName("deve somar peças e serviços no total do orçamento")
-        void shouldIncludeServicesInEstimateTotal() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            addService(workOrderId, "Mão de obra", new BigDecimal("100.00"));
 
-            EstimateResponseDto estimate = createEstimate(workOrderId, partId, 1);
 
-            assertEquals(0, new BigDecimal("50.00").compareTo(estimate.partsAmount()));
-            assertEquals(0, new BigDecimal("100.00").compareTo(estimate.laborAmount()));
-            assertEquals(0, new BigDecimal("150.00").compareTo(estimate.totalAmount()));
-        }
 
-        @Test
-        @DisplayName("deve mover a OS de diagnóstico para aguardando aprovação ao gerar o orçamento")
-        void shouldAutoAdvanceToWaitingApprovalOnEstimate() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
 
-            createEstimate(workOrderId, partId, 1);
 
-            assertEquals(WorkOrderStatus.WAITING_APPROVAL, getWorkOrder(workOrderId).status());
-        }
 
-        @Test
-        @DisplayName("deve recusar o orçamento, concluir a OS e registrar o cancelamento")
-        void shouldRejectEstimateAndCompleteWorkOrder() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            EstimateResponseDto estimate = createEstimate(workOrderId, partId, 1);
 
-            EstimateResponseDto rejected = rejectEstimate(workOrderId, estimate.estimateId());
 
-            assertEquals(EstimateStatus.REJECTED, rejected.status());
-            WorkOrderResponseDto workOrder = getWorkOrder(workOrderId);
-            assertEquals(WorkOrderStatus.COMPLETED, workOrder.status());
-            assertNotNull(workOrder.closedAt());
-            assertNotNull(workOrder.cancelledAt());
-        }
 
-        @Test
-        @DisplayName("deve bloquear alterações e entrega depois da recusa do orçamento")
-        void shouldLockWorkOrderAfterEstimateRejection() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            EstimateResponseDto estimate = createEstimate(workOrderId, partId, 1);
-            rejectEstimate(workOrderId, estimate.estimateId());
 
-            ApiErrorResponseDto serviceError = extractError(given()
-                    .contentType("application/json")
-                    .body("{\"description\":\"Tentativa bloqueada\",\"price\":10.00}")
-            .when()
-                    .post(WORK_ORDERS_PATH + "/" + workOrderId + "/services")
-            .then()
-                    .statusCode(422)
-                    .extract().response());
 
-            ApiErrorResponseDto deliveryError = extractError(given()
-                    .contentType("application/json")
-                    .body("{\"status\":\"DELIVERED\"}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/status")
-            .then()
-                    .statusCode(422)
-                    .extract().response());
 
-            assertEquals("WORK_ORDER_LOCKED", serviceError.code());
-            assertEquals("WORK_ORDER_LOCKED", deliveryError.code());
-        }
 
-        @Test
-        @DisplayName("deve reservar o estoque ao levar a OS para aguardando aprovação")
-        void shouldReserveStockWhenAwaitingApproval() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            int stockBefore = stockOf(partId);
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
 
-            createEstimate(workOrderId, partId, 3);
 
-            assertEquals(stockBefore - 3, stockOf(partId));
-        }
-
-        @Test
-        @DisplayName("deve manter a OS em diagnóstico e o estoque intacto quando falta saldo de peça")
-        void shouldKeepDiagnosisWhenInsufficientStock() {
-            Part part = new Part("Peça rara", "estoque baixo", new BigDecimal("50.00"), 1, "UN");
-            UUID partId = persistInTransaction(() -> partRepository.save(part)).getId();
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-
-            ApiErrorResponseDto error = extractError(given()
-                    .contentType("application/json")
-                    .body("{\"items\":[{\"partId\":\"%s\",\"quantity\":5}]}".formatted(partId))
-            .when()
-                    .post(WORK_ORDERS_PATH + "/" + workOrderId + "/estimate")
-            .then()
-                    .statusCode(422)
-                    .extract().response());
-
-            assertEquals("INSUFFICIENT_PART_STOCK", error.code());
-            assertEquals(1, stockOf(partId));
-            assertEquals(WorkOrderStatus.DIAGNOSIS, getWorkOrder(workOrderId).status());
-        }
-
-        @Test
-        @DisplayName("deve devolver as peças reservadas ao estoque quando o orçamento é recusado")
-        void shouldRestoreStockWhenEstimateIsRejected() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            int stockBefore = stockOf(partId);
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            EstimateResponseDto estimate = createEstimate(workOrderId, partId, 3);
-            assertEquals(stockBefore - 3, stockOf(partId));
-
-            rejectEstimate(workOrderId, estimate.estimateId());
-
-            assertEquals(stockBefore, stockOf(partId));
-        }
-
-        @Test
-        @DisplayName("deve manter a reserva de estoque quando o orçamento é aprovado")
-        void shouldKeepStockReservedWhenEstimateIsApproved() {
-            UUID partId = seedPart(new BigDecimal("50.00"));
-            int stockBefore = stockOf(partId);
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            EstimateResponseDto estimate = createEstimate(workOrderId, partId, 3);
-
-            approveEstimate(workOrderId, estimate.estimateId());
-
-            assertEquals(stockBefore - 3, stockOf(partId));
-        }
     }
 
     @Nested
@@ -1230,37 +699,9 @@ class WorkOrderControllerIT {
             assertEquals(Set.of("workOrderId", "status", "openedAt"), payload.keySet());
         }
 
-        @Test
-        @DisplayName("deve enviar um link de acompanhamento na abertura e em cada mudança de status")
-        void shouldEmailTrackingLinkOnOpeningAndOnEveryStatusChange() {
-            SeededCustomer customer = seedCustomerWithEmail();
 
-            UUID workOrderId = createWorkOrder(customer.id(), seedVehicle());
-            assertEquals(1, trackingLinks(customer.email()).size());
 
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            assertEquals(2, trackingLinks(customer.email()).size());
 
-            createEstimate(workOrderId, seedPart(new BigDecimal("80.00")), 1);
-            assertEquals(3, trackingLinks(customer.email()).size());
-        }
-
-        @Test
-        @DisplayName("o acompanhamento de uma OS recusada deve mostrar a conclusão e o cancelamento")
-        void shouldTrackWorkOrderClosedByRejection() {
-            SeededCustomer customer = seedCustomerWithEmail();
-            UUID workOrderId = createWorkOrder(customer.id(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            EstimateResponseDto estimate = createEstimate(workOrderId, seedPart(new BigDecimal("80.00")), 1);
-            rejectEstimate(workOrderId, estimate.estimateId());
-
-            WorkOrderTrackingResponseDto tracked = track(latestTrackingToken(customer.email()), 200)
-                    .as(WorkOrderTrackingResponseDto.class);
-
-            assertEquals(WorkOrderStatus.COMPLETED, tracked.status());
-            assertNotNull(tracked.closedAt());
-            assertNotNull(tracked.cancelledAt());
-        }
 
         @Test
         @DisplayName("não deve existir acompanhamento por id, sem o link enviado ao cliente")
@@ -1297,114 +738,21 @@ class WorkOrderControllerIT {
             assertEquals("TRACKING_TOKEN_EXPIRED", error.code());
         }
 
-        @Test
-        @DisplayName("deve enviar por e-mail um link de aprovação e um de recusa ao aguardar a decisão")
-        void shouldEmailBothDecisionLinks() {
-            SeededCustomer customer = seedCustomerWithEmail();
-            UUID workOrderId = createWorkOrder(customer.id(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
 
-            createEstimate(workOrderId, seedPart(new BigDecimal("80.00")), 1);
 
-            assertEquals(2, decisionLinks(customer.email()).size());
-        }
 
-        @Test
-        @DisplayName("novo orçamento sobre uma OS já em WAITING_APPROVAL também reserva e é enviado")
-        void shouldReserveAndEmailReplacementEstimate() {
-            SeededCustomer customer = seedCustomerWithEmail();
-            UUID workOrderId = createWorkOrder(customer.id(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            UUID partId = seedPart(new BigDecimal("80.00"));
-            int stockBefore = stockOf(partId);
-            createEstimate(workOrderId, partId, 2);
 
-            createEstimate(workOrderId, partId, 3);
 
-            assertEquals(stockBefore - 5, stockOf(partId));
-            assertEquals(4, decisionLinks(customer.email()).size());
-        }
 
-        @Test
-        @DisplayName("cliente deve aprovar pelo link recebido, iniciando a execução e mantendo a reserva")
-        void shouldApproveThroughEmailedLink() {
-            UUID partId = seedPart(new BigDecimal("80.00"));
-            int stockBefore = stockOf(partId);
-            Scenario scenario = awaitingDecision(partId, 2);
 
-            EstimateResponseDto approved = decide(scenario.approveToken(), 200)
-                    .as(EstimateResponseDto.class);
 
-            assertEquals(EstimateStatus.APPROVED, approved.status());
-            assertEquals(WorkOrderStatus.IN_PROGRESS, getWorkOrder(scenario.workOrderId()).status());
-            assertEquals(stockBefore - 2, stockOf(partId));
-        }
 
-        @Test
-        @DisplayName("cliente deve recusar pelo link recebido, devolvendo o estoque e cancelando a OS")
-        void shouldRejectThroughEmailedLink() {
-            UUID partId = seedPart(new BigDecimal("80.00"));
-            int stockBefore = stockOf(partId);
-            Scenario scenario = awaitingDecision(partId, 2);
 
-            EstimateResponseDto rejected = decide(scenario.rejectToken(), 200)
-                    .as(EstimateResponseDto.class);
 
-            WorkOrderResponseDto workOrder = getWorkOrder(scenario.workOrderId());
-            assertEquals(EstimateStatus.REJECTED, rejected.status());
-            assertEquals(WorkOrderStatus.COMPLETED, workOrder.status());
-            assertNotNull(workOrder.cancelledAt());
-            assertEquals(stockBefore, stockOf(partId));
-        }
 
-        @Test
-        @DisplayName("deve retornar 410 ao reutilizar um link de decisão")
-        void shouldReturn410WhenLinkIsReused() {
-            Scenario scenario = awaitingDecision(seedPart(new BigDecimal("80.00")), 1);
-            decide(scenario.approveToken(), 200);
 
-            ApiErrorResponseDto error = extractError(decide(scenario.approveToken(), 410));
 
-            assertEquals("DECISION_TOKEN_ALREADY_USED", error.code());
-        }
 
-        @Test
-        @DisplayName("deve retornar 409 quando o outro link decide um orçamento já decidido")
-        void shouldReturn409WhenEstimateWasAlreadyDecided() {
-            UUID partId = seedPart(new BigDecimal("80.00"));
-            int stockBefore = stockOf(partId);
-            Scenario scenario = awaitingDecision(partId, 2);
-            decide(scenario.approveToken(), 200);
-
-            ApiErrorResponseDto error = extractError(decide(scenario.rejectToken(), 409));
-
-            assertEquals("ESTIMATE_ALREADY_DECIDED", error.code());
-            assertEquals(stockBefore - 2, stockOf(partId));
-            assertEquals(WorkOrderStatus.IN_PROGRESS, getWorkOrder(scenario.workOrderId()).status());
-        }
-
-        @Test
-        @DisplayName("deve retornar 410 para um link apresentado depois dos sete dias")
-        void shouldReturn410WhenLinkHasExpired() {
-            UUID partId = seedPart(new BigDecimal("80.00"));
-            int stockBefore = stockOf(partId);
-            Scenario scenario = awaitingDecision(partId, 2);
-            expireDecisionWindow(scenario.workOrderId());
-
-            ApiErrorResponseDto error = extractError(decide(scenario.approveToken(), 410));
-
-            assertEquals("DECISION_TOKEN_EXPIRED", error.code());
-            assertEquals(stockBefore - 2, stockOf(partId));
-            assertEquals(WorkOrderStatus.WAITING_APPROVAL, getWorkOrder(scenario.workOrderId()).status());
-        }
-
-        @Test
-        @DisplayName("deve retornar 400 para um link que não foi emitido pela oficina")
-        void shouldReturn400ForForgedLink() {
-            ApiErrorResponseDto error = extractError(decide("nao-e-um-link-valido", 400));
-
-            assertEquals("DECISION_TOKEN_INVALID", error.code());
-        }
 
         private Response track(String token, int expectedStatus) {
             return given()
@@ -1421,26 +769,9 @@ class WorkOrderControllerIT {
             return tokenOf(links.get(links.size() - 1));
         }
 
-        private Response decide(String token, int expectedStatus) {
-            return given()
-            .when()
-                    .post(DECISION_PATH + token)
-            .then()
-                    .statusCode(expectedStatus)
-                    .extract().response();
-        }
 
         // Leva uma OS recém-aberta até WAITING_APPROVAL e recolhe do e-mail os dois links que a
         // oficina enviou ao cliente, que é como o cliente real chega ao endpoint de decisão.
-        private Scenario awaitingDecision(UUID partId, int quantity) {
-            SeededCustomer customer = seedCustomerWithEmail();
-            UUID workOrderId = createWorkOrder(customer.id(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            createEstimate(workOrderId, partId, quantity);
-
-            List<String> links = decisionLinks(customer.email());
-            return new Scenario(workOrderId, tokenOf(links.get(0)), tokenOf(links.get(1)));
-        }
 
         private String tokenOf(String link) {
             return link.substring(link.lastIndexOf('/') + 1);
@@ -1448,15 +779,6 @@ class WorkOrderControllerIT {
     }
 
     // Esperar sete dias não é uma opção, então o vencimento dos links é antecipado na base.
-    private void expireDecisionWindow(UUID workOrderId) {
-        persistInTransaction(() -> decisionTokenRepository.update(
-                "expiresAt = ?1 where workOrderId = ?2",
-                LocalDateTime.now(ZoneId.systemDefault()).minusDays(1),
-                workOrderId));
-    }
-
-    private record Scenario(UUID workOrderId, String approveToken, String rejectToken) {
-    }
 
     private record SeededCustomer(UUID id, String email) {
     }
@@ -1465,23 +787,25 @@ class WorkOrderControllerIT {
     @DisplayName("GET /v1/work-orders — fila operacional")
     class OperationalQueue {
 
+
+
         @Test
-        @DisplayName("deve agrupar por estágio de trabalho, do IN_PROGRESS ao RECEIVED")
-        void shouldGroupByWorkStage() {
+        @DisplayName("agrupa as ordens por estágio e exclui as concluídas")
+        void groupsActiveStatusesAndExcludesCompleted() {
             UUID received = createWorkOrder(seedCustomer(), seedVehicle());
             UUID diagnosis = createWorkOrder(seedCustomer(), seedVehicle());
             updateStatus(diagnosis, WorkOrderStatus.DIAGNOSIS);
-            UUID waitingApproval = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(waitingApproval, WorkOrderStatus.DIAGNOSIS);
-            createEstimate(waitingApproval, seedPart(new BigDecimal("40.00")), 1);
-            UUID inProgress = createWorkOrderInProgress(new BigDecimal("100.00"), 1);
-
+            UUID waiting = createWorkOrder(seedCustomer(), seedVehicle());
+            UUID inProgress = createWorkOrder(seedCustomer(), seedVehicle());
+            UUID completed = createWorkOrder(seedCustomer(), seedVehicle());
+            seedPersistedStatus(waiting, WorkOrderStatus.WAITING_APPROVAL, false);
+            seedPersistedStatus(inProgress, WorkOrderStatus.IN_PROGRESS, false);
+            seedPersistedStatus(completed, WorkOrderStatus.COMPLETED, true);
             List<UUID> queue = operationalQueueIds();
-
-            assertTrue(queue.containsAll(List.of(inProgress, waitingApproval, diagnosis, received)));
-            assertTrue(queue.indexOf(inProgress) < queue.indexOf(waitingApproval));
-            assertTrue(queue.indexOf(waitingApproval) < queue.indexOf(diagnosis));
+            assertTrue(queue.indexOf(inProgress) < queue.indexOf(waiting));
+            assertTrue(queue.indexOf(waiting) < queue.indexOf(diagnosis));
             assertTrue(queue.indexOf(diagnosis) < queue.indexOf(received));
+            assertFalse(queue.contains(completed));
         }
 
         // A OS aberta por último é retroagida para que a ordem de criação e a ordem esperada fiquem
@@ -1499,35 +823,9 @@ class WorkOrderControllerIT {
             assertTrue(queue.indexOf(oldest) < queue.indexOf(createdFirst));
         }
 
-        @Test
-        @DisplayName("deve excluir da fila as OS concluídas, entregues e concluídas por recusa")
-        void shouldExcludeClosedWorkOrders() {
-            UUID completed = createWorkOrderInProgress(new BigDecimal("100.00"), 1);
-            closeWorkOrder(completed);
-            UUID delivered = createWorkOrderInProgress(new BigDecimal("100.00"), 1);
-            closeWorkOrder(delivered);
-            updateStatus(delivered, WorkOrderStatus.DELIVERED);
-            UUID cancelled = createWorkOrderRejectedByCustomer();
 
-            List<UUID> queue = operationalQueueIds();
 
-            assertFalse(queue.contains(completed));
-            assertFalse(queue.contains(delivered));
-            assertFalse(queue.contains(cancelled));
-            assertEquals(WorkOrderStatus.COMPLETED, getWorkOrder(cancelled).status());
-            assertNotNull(getWorkOrder(cancelled).cancelledAt());
-        }
 
-        @Test
-        @DisplayName("deve contar apenas as OS que continuam na fila")
-        void shouldCountOnlyTheQueuedWorkOrders() {
-            long before = operationalQueuePage(0, 1).pagination().totalElements();
-
-            createWorkOrder(seedCustomer(), seedVehicle());
-            closeWorkOrder(createWorkOrderInProgress(new BigDecimal("100.00"), 1));
-
-            assertEquals(before + 1, operationalQueuePage(0, 1).pagination().totalElements());
-        }
 
         @Test
         @DisplayName("deve paginar exatamente o conjunto filtrado")
@@ -1558,50 +856,31 @@ class WorkOrderControllerIT {
             assertFalse(page.pagination().hasNext());
         }
 
-        private void closeWorkOrder(UUID workOrderId) {
-            given()
-                    .contentType("application/json")
-                    .body("{}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/close")
-            .then()
-                    .statusCode(200);
-        }
 
-        private UUID createWorkOrderRejectedByCustomer() {
-            UUID workOrderId = createWorkOrder(seedCustomer(), seedVehicle());
-            updateStatus(workOrderId, WorkOrderStatus.DIAGNOSIS);
-            EstimateResponseDto estimate = createEstimate(workOrderId, seedPart(new BigDecimal("60.00")), 1);
-            rejectEstimate(workOrderId, estimate.estimateId());
-            return workOrderId;
-        }
     }
 
     @Nested
     @DisplayName("GET /v1/work-orders/metrics/average-execution-time — tempo médio de execução")
     class Metrics {
-
         @Test
-        @DisplayName("deve retornar o tempo médio de execução após finalizar uma OS")
-        void shouldReturnAverageExecutionTime() {
-            UUID workOrderId = createWorkOrderInProgress(new BigDecimal("100.00"), 1);
-            given()
-                    .contentType("application/json")
-                    .body("{}")
-            .when()
-                    .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/close")
-            .then()
-                    .statusCode(200);
-
-            WorkOrderMetricsResponseDto metrics = given()
-            .when()
+        @DisplayName("calcula a métrica das ordens concluídas persistidas")
+        void returnsAverageForPersistedCompletedOrders() {
+            UUID order = createWorkOrder(seedCustomer(), seedVehicle());
+            seedPersistedStatus(order, WorkOrderStatus.COMPLETED, true);
+            WorkOrderMetricsResponseDto metrics = given().when()
                     .get(WORK_ORDERS_PATH + "/metrics/average-execution-time")
-            .then()
-                    .statusCode(200)
-                    .extract().as(WorkOrderMetricsResponseDto.class);
-
+                    .then().statusCode(200).extract().as(WorkOrderMetricsResponseDto.class);
             assertTrue(metrics.completedWorkOrders() >= 1);
             assertNotNull(metrics.averageExecutionMinutes());
         }
+    }
+
+    private void seedPersistedStatus(UUID order, WorkOrderStatus status, boolean closed) {
+        persistInTransaction(() -> Panache.getSession().flatMap(session -> session.createNativeQuery("""
+                UPDATE oficina_mecanica.work_order SET status = :status,
+                    closed_at = CASE WHEN :closed THEN opened_at + interval '1 hour' ELSE NULL END
+                WHERE work_order_id = :id
+                """).setParameter("status", status.name()).setParameter("closed", closed)
+                .setParameter("id", order).executeUpdate()));
     }
 }

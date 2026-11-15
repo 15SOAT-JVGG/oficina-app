@@ -6,10 +6,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import br.com.fiap.postech.soat16.fase1.workorder.application.port.out.EstimateDecisionInvitation;
 import br.com.fiap.postech.soat16.fase1.workorder.application.port.out.WorkOrderNotificationPort;
 import br.com.fiap.postech.soat16.fase1.workorder.application.port.out.WorkOrderTrackingInvitation;
-import br.com.fiap.postech.soat16.fase1.workorder.domain.model.Estimate;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.WorkOrder;
 
 import io.micrometer.core.instrument.Counter;
@@ -30,7 +28,6 @@ import io.smallrye.mutiny.Uni;
 @ApplicationScoped
 public class SmtpNotificationAdapter implements WorkOrderNotificationPort {
 
-    private static final String DECISION_PATH = "/v1/public/work-orders/estimate-decisions/";
     private static final String TRACKING_PATH = "/v1/public/work-orders/tracking/";
     private static final DateTimeFormatter DEADLINE_FORMAT =
             DateTimeFormatter.ofPattern("dd/MM/yyyy 'às' HH:mm");
@@ -49,33 +46,6 @@ public class SmtpNotificationAdapter implements WorkOrderNotificationPort {
         successes = registry.counter("workshop.integration.calls", "integration", "smtp", "outcome", "success");
         failures = registry.counter("workshop.integration.calls", "integration", "smtp", "outcome", "failure");
         this.publicBaseUrl = publicBaseUrl;
-    }
-
-    @Override
-    public Uni<Void> notifyEstimateAwaitingDecision(WorkOrder order, Estimate estimate,
-            EstimateDecisionInvitation invitation) {
-        String recipient = customerEmail(order);
-        if (recipient == null) {
-            return skip(order, "orcamento aguardando decisao");
-        }
-        String body = """
-                Ola, %s!
-
-                O orcamento da sua ordem de servico %s esta pronto: R$ %s.
-
-                Aprovar o servico:  %s
-                Recusar o servico:  %s
-
-                Os links valem para uma unica resposta e expiram em %s.
-                """.formatted(
-                        customerName(order),
-                        order.getId(),
-                        estimate.getTotalAmount(),
-                        decisionLink(invitation.approveToken()),
-                        decisionLink(invitation.rejectToken()),
-                        invitation.expiresAt().format(DEADLINE_FORMAT));
-        return deliver(order, "orcamento aguardando decisao", Mail.withText(recipient,
-                "Orcamento da ordem de servico " + order.getId(), body));
     }
 
     @Override
@@ -140,10 +110,6 @@ public class SmtpNotificationAdapter implements WorkOrderNotificationPort {
         Log.warnf("Notificacao nao enviada: OS %s nao tem e-mail de cliente. Assunto=%s",
                 order.getId(), subject);
         return Uni.createFrom().voidItem();
-    }
-
-    private String decisionLink(String signedToken) {
-        return publicBaseUrl + DECISION_PATH + signedToken;
     }
 
     private String trackingLink(String signedToken) {

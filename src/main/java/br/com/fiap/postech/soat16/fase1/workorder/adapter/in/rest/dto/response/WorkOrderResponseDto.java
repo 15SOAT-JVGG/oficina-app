@@ -9,6 +9,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderPriority;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderStatus;
+import br.com.fiap.postech.soat16.fase1.workorder.domain.model.integration.EstimateProjection;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -24,5 +25,7 @@ public record WorkOrderResponseDto(
     LocalDateTime cancelledAt,
     BigDecimal estimatedValue,
     BigDecimal finalValue,
-    UUID assignedWorkerId
+    UUID assignedWorkerId,
+    EstimateProjection.Status estimateProgress,
+    String estimateFailureReason
 ) { }

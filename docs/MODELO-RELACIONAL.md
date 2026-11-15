@@ -1,67 +1,49 @@
-# Modelo Relacional — Oficina Mecânica
+# Modelo Relacional — OS
 
-Modelo extraído das entidades JPA do projeto (schema `oficina_mecanica`, tabelas geradas via Hibernate `ddl-auto`).
+Modelo atual do serviço OS no schema `oficina_mecanica`. O catálogo não pertence mais a este
+serviço: a migration `V5__remove_local_catalog.sql` remove `parts` e `service_item` e as FKs que os
+referenciavam. IDs presentes nas antigas tabelas `estimate_item` e `work_order_service` são mantidos
+como histórico, sem FK nem leitura pela aplicação.
 
-> Observação: a tabela `app_users` existente em `db/init.sql` é uma tabela legada de seed/autenticação, sem entidade JPA correspondente — não faz parte do modelo de domínio abaixo.
-
-## Diagrama ER (Mermaid)
+## Diagrama ER
 
 ```mermaid
 erDiagram
+    CUSTOMER ||--o{ VEHICLE : possui
+    CUSTOMER ||--o{ WORK_ORDER : solicita
+    VEHICLE ||--o{ WORK_ORDER : "é objeto de"
+    WORKER ||--o{ WORK_ORDER : "atende (opcional)"
+    WORK_ORDER ||--o{ WORK_ORDER_HISTORY : registra
+    WORK_ORDER ||--|| ESTIMATE_PROJECTION : "acompanha orçamento"
+    WORK_ORDER_OUTBOX ||--|| ESTIMATE_PROJECTION : "evento de abertura"
+
     CUSTOMER {
         uuid customer_id PK
+        string document UK
         string first_name
         string last_name
         string email
         string phone_number
-        string document
-        enum document_type
+        boolean active
     }
-
     VEHICLE {
         uuid vehicle_id PK
         uuid customer_id FK
-        string license_plate
+        string license_plate UK
         string manufacturer
         string model
-        string color
         int year
         long km_driven
         enum type
     }
-
     WORKER {
         uuid worker_id PK
         enum profile
         string first_name
         string last_name
         string email
-        string phone_number
-        string password_hash
         boolean active
     }
-
-    PARTS {
-        uuid part_id PK
-        string name
-        string description
-        decimal unit_price
-        int stock_quantity
-        string unit
-        int minimum_stock
-        enum part_type
-        long version
-    }
-
-    SERVICE_ITEM {
-        uuid service_item_id PK
-        string name
-        string description
-        decimal base_price
-        int estimated_duration_minutes
-        boolean active
-    }
-
     WORK_ORDER {
         uuid work_order_id PK
         uuid customer_id FK
@@ -76,27 +58,6 @@ erDiagram
         decimal estimated_value
         decimal final_value
     }
-
-    ESTIMATE {
-        uuid estimate_id PK
-        uuid work_order_id FK
-        enum status
-        decimal parts_amount
-        decimal labor_amount
-        decimal total_amount
-        datetime approved_at
-        datetime sent_at
-    }
-
-    ESTIMATE_ITEM {
-        uuid estimate_item_id PK
-        uuid estimate_id FK
-        uuid part_id FK
-        int quantity
-        decimal unit_price
-        decimal total_price
-    }
-
     WORK_ORDER_HISTORY {
         uuid work_order_history_id PK
         uuid work_order_id FK
@@ -104,51 +65,55 @@ erDiagram
         enum new_status
         datetime changed_at
     }
-
-    WORK_ORDER_SERVICE {
-        uuid work_order_service_id PK
-        uuid work_order_id FK
-        uuid service_item_id FK
-        string description
-        decimal price
-        datetime performed_at
+    WORK_ORDER_OUTBOX {
+        bigint sequence_id PK
+        uuid event_id UK
+        uuid work_order_id
+        string event_type
+        jsonb payload
+        string traceparent
+        datetime created_at
+        datetime published_at
     }
-
-    CUSTOMER ||--o{ VEHICLE : possui
-    CUSTOMER ||--o{ WORK_ORDER : solicita
-    VEHICLE ||--o{ WORK_ORDER : "é objeto de"
-    WORKER ||--o{ WORK_ORDER : "atende (opcional)"
-    WORK_ORDER ||--o{ ESTIMATE : gera
-    WORK_ORDER ||--o{ WORK_ORDER_HISTORY : registra
-    WORK_ORDER ||--o{ WORK_ORDER_SERVICE : inclui
-    SERVICE_ITEM ||--o{ WORK_ORDER_SERVICE : "originou (opcional)"
-    ESTIMATE ||--o{ ESTIMATE_ITEM : detalha
-    PARTS ||--o{ ESTIMATE_ITEM : usada_em
+    ESTIMATE_PROJECTION {
+        uuid work_order_id PK
+        uuid opening_event_id FK
+        uuid saga_id
+        uuid correlation_id
+        enum status
+        uuid estimate_id
+        jsonb estimate_data
+        string failure_code
+        string failure_message
+    }
+    WORK_ORDER_INBOX {
+        uuid event_id PK
+        uuid work_order_id
+        string event_type
+        datetime received_at
+    }
 ```
 
-## Entidades isoladas (sem FK no modelo JPA atual)
-Nenhuma — todas as entidades possuem ao menos um relacionamento.
+`work_order_outbox`, `work_order_estimate_projection` e `work_order_inbox` são criadas pela
+migration V4. A outbox guarda `workOrderId` sem FK para a OS, pois o Flyway executa antes da criação
+da tabela Hibernate em um banco vazio. A aplicação grava a OS, a projeção e o evento dentro da mesma
+transação reativa.
 
-## Enums utilizados
+`estimate_item` e `work_order_service` são tabelas históricas que podem existir após a V5. A migration
+remove suas FKs para as tabelas do catálogo e mantém os dados legados; não há entidades, repositórios
+ou endpoints OS para essas tabelas. A projeção do orçamento guarda o payload de Billing em JSONB e
+não consulta o banco do Billing.
+
+## Enums
+
 | Enum | Valores |
 |---|---|
 | `DocumentType` | CPF, CNPJ |
 | `VehicleType` | CAR, MOTORCYCLE |
 | `WorkerProfile` | MECHANIC, ATTENDANT |
-| `PartType` | PART, SUPPLY |
 | `WorkOrderPriority` | LOW, MEDIUM, HIGH, URGENT |
 | `WorkOrderStatus` | RECEIVED, DIAGNOSIS, WAITING_APPROVAL, IN_PROGRESS, COMPLETED, DELIVERED |
-| `EstimateStatus` | PENDING, APPROVED, REJECTED |
+| Projeção de orçamento | `AGUARDANDO`, `CRIADO`, `FALHOU`; sem solicitação inicial o status fica nulo |
 
-## Cardinalidades
-- Customer (1) → (N) Vehicle
-- Customer (1) → (N) WorkOrder
-- Vehicle (1) → (N) WorkOrder
-- Worker (1) → (N) WorkOrder (mecânico responsável, FK `assigned_worker_id` opcional/nullable)
-- WorkOrder (1) → (N) Estimate
-- WorkOrder (1) → (N) WorkOrderHistory
-- WorkOrder (1) → (N) WorkOrderService
-- ServiceItem (1) → (N) WorkOrderService (item de catálogo de origem, FK `service_item_id` opcional/nullable)
-- Estimate (1) → (N) EstimateItem
-- Part (1) → (N) EstimateItem
-
+O diagrama representa relações garantidas por FK ou pela transação de escrita. `work_order_id` da
+outbox e `work_order_id` da inbox são metadados da integração, sem FK entre bounded contexts.

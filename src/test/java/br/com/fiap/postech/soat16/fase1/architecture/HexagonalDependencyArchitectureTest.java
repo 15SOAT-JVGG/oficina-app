@@ -20,8 +20,6 @@ class HexagonalDependencyArchitectureTest {
     private static final List<String> CONTEXTS = List.of(
             "auth",
             "customer",
-            "part",
-            "servicecatalog",
             "vehicle",
             "worker",
             "workorder");

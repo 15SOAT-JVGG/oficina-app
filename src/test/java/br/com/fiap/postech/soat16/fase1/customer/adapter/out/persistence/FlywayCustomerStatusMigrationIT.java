@@ -125,6 +125,7 @@ class FlywayCustomerStatusMigrationIT {
                 .locations("classpath:db/migration")
                 .baselineOnMigrate(true)
                 .baselineVersion("1")
+                .target("3")
                 .load()
                 .migrate();
     }

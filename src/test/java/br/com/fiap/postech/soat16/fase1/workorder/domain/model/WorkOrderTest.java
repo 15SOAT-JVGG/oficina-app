@@ -19,7 +19,6 @@ import br.com.fiap.postech.soat16.fase1.vehicle.domain.model.Vehicle;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.exception.EstimateNotApprovedException;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.exception.InvalidWorkOrderStatusTransitionException;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.exception.WorkOrderLockedException;
-import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.EstimateStatus;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderPriority;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderStatus;
 
@@ -204,64 +203,6 @@ class WorkOrderTest {
     }
 
     @Nested
-    @DisplayName("estimate lifecycle")
-    class EstimateLifecycle {
-
-        private static final LocalDateTime CHANGED_AT = LocalDateTime.of(2026, 1, 10, 10, 0);
-
-        @Test
-        @DisplayName("registering an estimate updates value and enters waiting approval")
-        void registersEstimate() {
-            WorkOrder order = workOrder(UUID.randomUUID(), WorkOrderStatus.DIAGNOSIS);
-            Estimate estimate = estimate(order, "175.00");
-
-            var history = order.registerEstimate(estimate, CHANGED_AT);
-
-            assertEquals(new BigDecimal("175.00"), order.getEstimatedValue());
-            assertEquals(WorkOrderStatus.WAITING_APPROVAL, order.getStatus());
-            assertTrue(history.isPresent());
-        }
-
-        @Test
-        @DisplayName("approval advances a waiting work order to execution")
-        void registersApproval() {
-            WorkOrder order = workOrder(UUID.randomUUID(), WorkOrderStatus.WAITING_APPROVAL);
-            Estimate estimate = estimate(order, "175.00");
-            estimate.setStatus(EstimateStatus.APPROVED);
-
-            var history = order.registerEstimateApproval(estimate, CHANGED_AT);
-
-            assertEquals(WorkOrderStatus.IN_PROGRESS, order.getStatus());
-            assertTrue(history.isPresent());
-            assertTrue(order.hasReservedStock());
-        }
-
-        @Test
-        @DisplayName("rejection completes a waiting work order and records cancellation time")
-        void registersRejection() {
-            WorkOrder order = workOrder(UUID.randomUUID(), WorkOrderStatus.WAITING_APPROVAL);
-
-            var history = order.registerEstimateRejection(CHANGED_AT);
-
-            assertEquals(WorkOrderStatus.COMPLETED, order.getStatus());
-            assertEquals(CHANGED_AT, order.getClosedAt());
-            assertEquals(CHANGED_AT, order.getCancelledAt());
-            assertTrue(history.isPresent());
-        }
-
-        @Test
-        @DisplayName("OS concluída por recusa não pode ser entregue")
-        void rejectsDeliveryAfterEstimateRejection() {
-            WorkOrder order = workOrder(UUID.randomUUID(), WorkOrderStatus.WAITING_APPROVAL);
-            order.registerEstimateRejection(CHANGED_AT);
-
-            assertThrows(
-                    WorkOrderLockedException.class,
-                    () -> order.transitionTo(WorkOrderStatus.DELIVERED, false, CHANGED_AT.plusMinutes(1)));
-        }
-    }
-
-    @Nested
     @DisplayName("closing")
     class Closing {
 
@@ -289,11 +230,5 @@ class WorkOrderTest {
         }
     }
 
-    private Estimate estimate(WorkOrder order, String total) {
-        Estimate estimate = new Estimate();
-        estimate.setWorkOrder(order);
-        estimate.setStatus(EstimateStatus.PENDING);
-        estimate.setTotalAmount(new BigDecimal(total));
-        return estimate;
-    }
+
 }

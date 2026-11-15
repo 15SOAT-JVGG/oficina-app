@@ -1,0 +1,23 @@
+{
+  "eventId": "33335831-f3c9-49b7-8f49-3af66b710570",
+  "version": 1,
+  "sagaId": "c3bf539f-118e-474d-9497-b446c687953a",
+  "correlationId": "0123aa40-a5f7-4b55-a95a-02dd7e38f3a0",
+  "causationId": "1f1c3028-54c9-4c1a-937a-5f91998a0265",
+  "workOrderId": "038ba207-22c3-4df5-8a26-afb8544851e9",
+  "occurredAt": "2026-11-12T12:00:00Z",
+  "type": "estimate.created",
+  "data": {
+    "estimateId": "18635d9b-85f3-4655-b2a8-056f726554d1",
+    "services": [
+      {
+        "catalogItemId": "75cd9331-ef14-456f-b69e-edfe34cfb0cb",
+        "name": "Revisão",
+        "quantity": 1,
+        "unitPrice": 100.0
+      }
+    ],
+    "parts": [],
+    "totalAmount": 100.0
+  }
+}

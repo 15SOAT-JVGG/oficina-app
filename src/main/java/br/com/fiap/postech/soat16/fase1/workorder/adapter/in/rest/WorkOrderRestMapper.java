@@ -4,30 +4,19 @@ import java.util.List;
 
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.pagination.PageableResponseDto;
 import br.com.fiap.postech.soat16.fase1.shared.application.result.PagedResult;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.EstimateRequestDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.InitialPartRequestDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.InitialServiceRequestDto;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.WorkOrderCloseRequestDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.WorkOrderRequestDto;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.WorkOrderServiceRequestDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.WorkOrderStatusUpdateRequestDto;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.EstimateItemResponseDto;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.EstimateResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.OpenedWorkOrderResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderMetricsResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderResponseDto;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderServiceResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderTrackingResponseDto;
-import br.com.fiap.postech.soat16.fase1.workorder.application.command.AddWorkOrderServiceCommand;
 import br.com.fiap.postech.soat16.fase1.workorder.application.command.ChangeWorkOrderStatusCommand;
-import br.com.fiap.postech.soat16.fase1.workorder.application.command.CloseWorkOrderCommand;
-import br.com.fiap.postech.soat16.fase1.workorder.application.command.CreateEstimateCommand;
 import br.com.fiap.postech.soat16.fase1.workorder.application.command.OpenWorkOrderCommand;
-import br.com.fiap.postech.soat16.fase1.workorder.application.result.EstimateResult;
 import br.com.fiap.postech.soat16.fase1.workorder.application.result.OpenWorkOrderResult;
 import br.com.fiap.postech.soat16.fase1.workorder.application.result.WorkOrderMetricsResult;
 import br.com.fiap.postech.soat16.fase1.workorder.application.result.WorkOrderResult;
-import br.com.fiap.postech.soat16.fase1.workorder.application.result.WorkOrderServiceResult;
 import br.com.fiap.postech.soat16.fase1.workorder.application.result.WorkOrderTrackingResult;
 
 public final class WorkOrderRestMapper {
@@ -64,22 +53,6 @@ public final class WorkOrderRestMapper {
         return new ChangeWorkOrderStatusCommand(request.status());
     }
 
-    public static CreateEstimateCommand toCommand(EstimateRequestDto request) {
-        return new CreateEstimateCommand(request.items().stream()
-                .map(item -> new CreateEstimateCommand.Item(
-                        item.partId(), item.quantity(), item.unitPrice()))
-                .toList());
-    }
-
-    public static AddWorkOrderServiceCommand toCommand(WorkOrderServiceRequestDto request) {
-        return new AddWorkOrderServiceCommand(
-                request.description(), request.price(), request.serviceItemId());
-    }
-
-    public static CloseWorkOrderCommand toCommand(WorkOrderCloseRequestDto request) {
-        return new CloseWorkOrderCommand(request.finalValue());
-    }
-
     public static PageableResponseDto<WorkOrderResponseDto> toResponse(
             PagedResult<WorkOrderResult> page) {
         return PageableResponseDto.of(
@@ -90,9 +63,7 @@ public final class WorkOrderRestMapper {
     }
 
     public static OpenedWorkOrderResponseDto toResponse(OpenWorkOrderResult result) {
-        return new OpenedWorkOrderResponseDto(
-                toResponse(result.workOrder()),
-                result.estimate() != null ? toResponse(result.estimate()) : null);
+        return new OpenedWorkOrderResponseDto(toResponse(result.workOrder()), null);
     }
 
     public static WorkOrderResponseDto toResponse(WorkOrderResult result) {
@@ -108,7 +79,9 @@ public final class WorkOrderRestMapper {
                 result.cancelledAt(),
                 result.estimatedValue(),
                 result.finalValue(),
-                result.assignedWorkerId());
+                result.assignedWorkerId(),
+                result.estimateProgress(),
+                result.estimateFailureReason());
     }
 
     public static WorkOrderTrackingResponseDto toResponse(WorkOrderTrackingResult result) {
@@ -118,37 +91,6 @@ public final class WorkOrderRestMapper {
                 result.openedAt(),
                 result.closedAt(),
                 result.cancelledAt());
-    }
-
-    public static EstimateResponseDto toResponse(EstimateResult result) {
-        return new EstimateResponseDto(
-                result.estimateId(),
-                result.workOrderId(),
-                result.status(),
-                result.partsAmount(),
-                result.laborAmount(),
-                result.totalAmount(),
-                result.approvedAt(),
-                result.sentAt(),
-                result.items().stream()
-                        .map(item -> new EstimateItemResponseDto(
-                                item.estimateItemId(),
-                                item.partId(),
-                                item.partName(),
-                                item.quantity(),
-                                item.unitPrice(),
-                                item.totalPrice()))
-                        .toList());
-    }
-
-    public static WorkOrderServiceResponseDto toResponse(WorkOrderServiceResult result) {
-        return new WorkOrderServiceResponseDto(
-                result.workOrderServiceId(),
-                result.workOrderId(),
-                result.description(),
-                result.price(),
-                result.performedAt(),
-                result.serviceItemId());
     }
 
     public static WorkOrderMetricsResponseDto toResponse(WorkOrderMetricsResult result) {

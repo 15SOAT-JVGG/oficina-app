@@ -63,16 +63,10 @@ public interface CustomerWorkOrderControllerDocs {
     @PATCH
     @Path("/{id}/estimate/{estimateId}/approve")
     @Consumes(MediaType.WILDCARD)
-    @Operation(summary = "Aprovar o orçamento de uma das minhas ordens",
-            description = "Mantém a reserva de estoque e leva a ordem a IN_PROGRESS.")
-    @APIResponse(responseCode = "200", description = "Orçamento aprovado",
-            content = @Content(mediaType = MediaType.APPLICATION_JSON,
-                    schema = @Schema(implementation = EstimateResponseDto.class)))
-    @APIResponse(responseCode = "401", description = "Token ausente, inválido ou expirado")
+    @Operation(summary = "Decisão indisponível", description = "Aguarda integração com Billing.")
+    @APIResponse(responseCode = "401", description = "Token ausente ou inválido")
     @APIResponse(responseCode = "403", description = "Token não pertence a um cliente")
-    @APIResponse(responseCode = "404", description = "Ordem ou orçamento inexistente, ou de outro cliente")
-    @APIResponse(responseCode = "409", description = "Orçamento já aprovado ou recusado")
-    @APIResponse(responseCode = "422", description = "Ordem de serviço bloqueada para novas alterações")
+    @APIResponse(responseCode = "503", description = "Fluxo temporariamente indisponível")
     Uni<EstimateResponseDto> approveMyEstimate(
             @Parameter(name = "id", description = "Work order identifier", required = true, in = ParameterIn.PATH)
             @PathParam("id") UUID id,
@@ -83,16 +77,10 @@ public interface CustomerWorkOrderControllerDocs {
     @PATCH
     @Path("/{id}/estimate/{estimateId}/reject")
     @Consumes(MediaType.WILDCARD)
-    @Operation(summary = "Recusar o orçamento de uma das minhas ordens",
-            description = "Devolve as peças ao estoque, conclui a ordem e preenche cancelledAt.")
-    @APIResponse(responseCode = "200", description = "Orçamento recusado",
-            content = @Content(mediaType = MediaType.APPLICATION_JSON,
-                    schema = @Schema(implementation = EstimateResponseDto.class)))
-    @APIResponse(responseCode = "401", description = "Token ausente, inválido ou expirado")
+    @Operation(summary = "Decisão indisponível", description = "Aguarda integração com Billing.")
+    @APIResponse(responseCode = "401", description = "Token ausente ou inválido")
     @APIResponse(responseCode = "403", description = "Token não pertence a um cliente")
-    @APIResponse(responseCode = "404", description = "Ordem ou orçamento inexistente, ou de outro cliente")
-    @APIResponse(responseCode = "409", description = "Orçamento já aprovado ou recusado")
-    @APIResponse(responseCode = "422", description = "Ordem de serviço bloqueada para novas alterações")
+    @APIResponse(responseCode = "503", description = "Fluxo temporariamente indisponível")
     Uni<EstimateResponseDto> rejectMyEstimate(
             @Parameter(name = "id", description = "Work order identifier", required = true, in = ParameterIn.PATH)
             @PathParam("id") UUID id,

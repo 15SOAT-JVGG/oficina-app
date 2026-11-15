@@ -3,7 +3,6 @@ package br.com.fiap.postech.soat16.fase1.workorder.domain.model;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 import br.com.fiap.postech.soat16.fase1.customer.domain.model.Customer;
@@ -88,35 +87,6 @@ public class WorkOrder extends AuditableEntity {
         finalValue = requestedFinalValue != null ? requestedFinalValue : estimatedValue;
         closedAt = changedAt;
         return applyStatus(WorkOrderStatus.COMPLETED, changedAt);
-    }
-
-    public Optional<WorkOrderHistory> registerEstimate(Estimate estimate, LocalDateTime changedAt) {
-        ensureMutable();
-        estimatedValue = estimate.getTotalAmount();
-        if (status == WorkOrderStatus.DIAGNOSIS) {
-            return Optional.of(applyStatus(WorkOrderStatus.WAITING_APPROVAL, changedAt));
-        }
-        return Optional.empty();
-    }
-
-    public Optional<WorkOrderHistory> registerEstimateApproval(Estimate estimate,
-            LocalDateTime changedAt) {
-        ensureMutable();
-        estimatedValue = estimate.getTotalAmount();
-        if (status == WorkOrderStatus.WAITING_APPROVAL) {
-            return Optional.of(applyStatus(WorkOrderStatus.IN_PROGRESS, changedAt));
-        }
-        return Optional.empty();
-    }
-
-    public Optional<WorkOrderHistory> registerEstimateRejection(LocalDateTime changedAt) {
-        ensureMutable();
-        if (status == WorkOrderStatus.WAITING_APPROVAL) {
-            closedAt = changedAt;
-            cancelledAt = changedAt;
-            return Optional.of(applyStatus(WorkOrderStatus.COMPLETED, changedAt));
-        }
-        return Optional.empty();
     }
 
     public boolean isOwnedBy(UUID customerId) {

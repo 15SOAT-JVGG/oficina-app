@@ -9,7 +9,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -24,11 +23,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import br.com.fiap.postech.soat16.fase1.customer.domain.model.Customer;
-import br.com.fiap.postech.soat16.fase1.workorder.application.port.out.EstimateDecisionInvitation;
 import br.com.fiap.postech.soat16.fase1.workorder.application.port.out.WorkOrderTrackingInvitation;
-import br.com.fiap.postech.soat16.fase1.workorder.domain.model.Estimate;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.WorkOrder;
-import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.EstimateStatus;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderPriority;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderStatus;
 
@@ -55,68 +51,6 @@ class SmtpNotificationAdapterTest {
     void setUp() {
         registry = new SimpleMeterRegistry();
         adapter = new SmtpNotificationAdapter(mailer, registry, BASE_URL);
-    }
-
-    @Nested
-    @DisplayName("notifyEstimateAwaitingDecision")
-    class NotifyEstimateAwaitingDecision {
-
-        @Test
-        @DisplayName("envia ao e-mail do cliente os dois links de decisão sob o endereço público")
-        void sendsBothDecisionLinks() {
-            when(mailer.send(any(Mail.class))).thenReturn(Uni.createFrom().voidItem());
-            WorkOrder order = workOrder(CUSTOMER_EMAIL);
-
-            adapter.notifyEstimateAwaitingDecision(order, estimate(order), invitation())
-                    .await().indefinitely();
-
-            assertEquals(1, registry.get("workshop.integration.calls").tag("outcome", "success").counter().count());
-            Mail mail = captureMail();
-            assertEquals(List.of(CUSTOMER_EMAIL), mail.getTo());
-            assertTrue(mail.getSubject().contains(WORK_ORDER_ID.toString()));
-            assertTrue(mail.getText().contains(
-                    BASE_URL + "/v1/public/work-orders/estimate-decisions/approve-token"));
-            assertTrue(mail.getText().contains(
-                    BASE_URL + "/v1/public/work-orders/estimate-decisions/reject-token"));
-        }
-
-        @Test
-        @DisplayName("informa ao cliente o valor do orçamento e o prazo da decisão")
-        void statesAmountAndDeadline() {
-            when(mailer.send(any(Mail.class))).thenReturn(Uni.createFrom().voidItem());
-            WorkOrder order = workOrder(CUSTOMER_EMAIL);
-
-            adapter.notifyEstimateAwaitingDecision(order, estimate(order), invitation())
-                    .await().indefinitely();
-
-            String body = captureMail().getText();
-            assertTrue(body.contains("150.00"));
-            assertTrue(body.contains("17/01/2026"));
-        }
-
-        @Test
-        @DisplayName("não envia nada quando a ordem não tem e-mail de cliente")
-        void skipsWhenCustomerHasNoEmail() {
-            WorkOrder order = workOrder(null);
-
-            adapter.notifyEstimateAwaitingDecision(order, estimate(order), invitation())
-                    .await().indefinitely();
-
-            verify(mailer, never()).send(any(Mail.class));
-        }
-
-        @Test
-        @DisplayName("conclui sem erro quando o servidor de e-mail recusa a mensagem")
-        void completesWhenMailServerRejectsMessage() {
-            when(mailer.send(any(Mail.class))).thenReturn(Uni.createFrom()
-                    .failure(new IllegalStateException("550 Too many emails per second")));
-            WorkOrder order = workOrder(CUSTOMER_EMAIL);
-
-            assertDoesNotThrow(() -> adapter
-                    .notifyEstimateAwaitingDecision(order, estimate(order), invitation())
-                    .await().indefinitely());
-            assertEquals(1, registry.get("workshop.integration.calls").tag("outcome", "failure").counter().count());
-        }
     }
 
     @Nested
@@ -210,11 +144,6 @@ class SmtpNotificationAdapterTest {
         return captor.getValue();
     }
 
-    private EstimateDecisionInvitation invitation() {
-        return new EstimateDecisionInvitation("approve-token", "reject-token",
-                LocalDateTime.of(2026, 1, 17, 9, 30));
-    }
-
     private WorkOrderTrackingInvitation tracking() {
         return new WorkOrderTrackingInvitation("tracking-token", LocalDateTime.of(2026, 2, 9, 9, 30));
     }
@@ -232,12 +161,5 @@ class SmtpNotificationAdapterTest {
         return workOrder;
     }
 
-    private Estimate estimate(WorkOrder workOrder) {
-        Estimate estimate = new Estimate();
-        estimate.setId(UUID.randomUUID());
-        estimate.setWorkOrder(workOrder);
-        estimate.setStatus(EstimateStatus.PENDING);
-        estimate.setTotalAmount(new BigDecimal("150.00"));
-        return estimate;
-    }
+
 }

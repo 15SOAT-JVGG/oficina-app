@@ -1,8 +1,10 @@
 # Fluxo da Ordem de Serviço (Work Order)
 
-Este documento explica o ciclo de vida de uma **ordem de serviço** (work order) na oficina mecânica:
-estados possíveis, regras de negócio e o passo a passo dos endpoints, do abertura até a entrega do
-veículo. Para detalhes de autenticação, portas e como rodar o projeto, veja o [README.md](README.md).
+Este documento mantém o histórico do ciclo de vida original da **ordem de serviço**. A transição da
+#109 mudou o contrato: veja a seção [Integração de abertura OS → Billing](README.md#integração-de-abertura-os--billing-transição-da-issue-109)
+para o comportamento vigente. As operações de orçamento, estoque e execução descritas adiante estão
+desativadas e respondem `503 LEGACY_FLOW_UNAVAILABLE` até as integrações com Billing e Execution
+serem concluídas. Para detalhes de autenticação e execução local, veja o [README.md](README.md).
 
 ---
 
