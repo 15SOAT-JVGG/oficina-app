@@ -34,7 +34,6 @@ import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.E
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.OpenedWorkOrderResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderMetricsResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderResponseDto;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderServiceResponseDto;
 
 import io.smallrye.mutiny.Uni;
 
@@ -80,15 +79,15 @@ public interface WorkOrderControllerDocs {
     @POST
     @Operation(summary = "Open work order",
             description = "Creates a new work order for an existing customer and vehicle. Initial status is "
-                    + "RECEIVED, default priority is MEDIUM, openedAt is set automatically. When the initial "
-                    + "request carries catalog services or parts, the matching pending estimate is created in "
-                    + "the same transaction, with prices snapshotted from the catalog. The customer is emailed "
-                    + "a signed tracking link.")
+                    + "RECEIVED, default priority is MEDIUM, and the customer receives a tracking link. "
+                    + "The initial request is published asynchronously; estimate is null on opening. "
+                    + "With items, estimateProgress is AGUARDANDO until Billing reports CRIADO or FALHOU. "
+                    + "Catalog references are validated asynchronously and do not cause a synchronous 404.")
     @APIResponse(responseCode = "201", description = "Work order opened successfully",
             content = @Content(mediaType = MediaType.APPLICATION_JSON,
                     schema = @Schema(implementation = OpenedWorkOrderResponseDto.class)))
     @APIResponse(responseCode = "400", description = "Invalid request body")
-    @APIResponse(responseCode = "404", description = "Customer, vehicle, worker, service item or part not found")
+    @APIResponse(responseCode = "404", description = "Customer, vehicle or worker not found")
     Uni<Response> create(
             @RequestBody(description = "Work order data for opening, including the initial service and part request")
             @Valid WorkOrderRequestDto body);
@@ -96,17 +95,13 @@ public interface WorkOrderControllerDocs {
     @PATCH
     @Path("/{id}/status")
     @Operation(summary = "Update work order status",
-            description = "Moves the work order to the next status in the lifecycle. Use /close to reach "
-                    + "COMPLETED. Moving to WAITING_APPROVAL reserves every part of the pending estimate and "
-                    + "emails the customer the approval and rejection links; when any part lacks stock nothing "
-                    + "is reserved, no email is sent and the work order stays in DIAGNOSIS. Moving to "
-                    + "IN_PROGRESS requires an approved estimate. DELIVERED blocks further changes.")
+            description = "Diagnóstico disponível; etapas dependentes de orçamento e estoque retornam 503.")
     @APIResponse(responseCode = "200", description = "Status updated successfully",
             content = @Content(mediaType = MediaType.APPLICATION_JSON,
                     schema = @Schema(implementation = WorkOrderResponseDto.class)))
     @APIResponse(responseCode = "404", description = "Work order not found")
-    @APIResponse(responseCode = "422", description = "Invalid status transition, missing approved estimate or "
-            + "insufficient part stock to reserve the pending estimate")
+    @APIResponse(responseCode = "422", description = "Invalid status transition")
+    @APIResponse(responseCode = "503", description = "Fluxo temporariamente indisponível")
     Uni<WorkOrderResponseDto> updateStatus(
             @Parameter(name = "id", description = "Work order identifier", required = true, in = ParameterIn.PATH)
             @PathParam("id") UUID id,
@@ -115,18 +110,8 @@ public interface WorkOrderControllerDocs {
 
     @POST
     @Path("/{id}/estimate")
-    @Operation(summary = "Create estimate", description = "Creates a new estimate with items priced from the "
-            + "parts catalog. totalAmount is the sum of (quantity * unitPrice) for every item. A work order in "
-            + "DIAGNOSIS moves to WAITING_APPROVAL, which reserves the estimate parts and emails the customer "
-            + "the decision links.")
-    @APIResponse(responseCode = "201", description = "Estimate created successfully",
-            content = @Content(mediaType = MediaType.APPLICATION_JSON,
-                    schema = @Schema(implementation = EstimateResponseDto.class)))
-    @APIResponse(responseCode = "400", description = "Invalid request body")
-    @APIResponse(responseCode = "404", description = "Work order or part not found")
-    @APIResponse(responseCode = "422",
-            description = "Ordem entregue ou concluída por recusa do orçamento, ou saldo insuficiente para "
-                    + "reservar uma das peças")
+    @Operation(summary = "Fluxo legado indisponível", description = "Aguarda integração com Billing e Execution.")
+    @APIResponse(responseCode = "503", description = "Fluxo temporariamente indisponível")
     Uni<Response> createEstimate(
             @Parameter(name = "id", description = "Work order identifier", required = true, in = ParameterIn.PATH)
             @PathParam("id") UUID id,
@@ -135,15 +120,8 @@ public interface WorkOrderControllerDocs {
 
     @PATCH
     @Path("/{id}/estimate/{estimateId}/approve")
-    @Operation(summary = "Approve estimate",
-            description = "Approves a pending estimate. Sets the work order's estimatedValue to the estimate's "
-                    + "totalAmount and, if the work order is WAITING_APPROVAL, advances it to IN_PROGRESS. The "
-                    + "stock reserved on entering WAITING_APPROVAL is kept.")
-    @APIResponse(responseCode = "200", description = "Estimate approved successfully",
-            content = @Content(mediaType = MediaType.APPLICATION_JSON,
-                    schema = @Schema(implementation = EstimateResponseDto.class)))
-    @APIResponse(responseCode = "404", description = "Work order or estimate not found")
-    @APIResponse(responseCode = "409", description = "Estimate already approved or rejected")
+    @Operation(summary = "Fluxo legado indisponível", description = "Aguarda integração com Billing e Execution.")
+    @APIResponse(responseCode = "503", description = "Fluxo temporariamente indisponível")
     Uni<EstimateResponseDto> approveEstimate(
             @Parameter(name = "id", description = "Work order identifier", required = true, in = ParameterIn.PATH)
             @PathParam("id") UUID id,
@@ -153,14 +131,8 @@ public interface WorkOrderControllerDocs {
 
     @PATCH
     @Path("/{id}/estimate/{estimateId}/reject")
-    @Operation(summary = "Reject estimate",
-            description = "Rejects a pending estimate, returning its reserved parts to stock. If the work order "
-                    + "is WAITING_APPROVAL it is completed and records cancelledAt.")
-    @APIResponse(responseCode = "200", description = "Estimate rejected successfully",
-            content = @Content(mediaType = MediaType.APPLICATION_JSON,
-                    schema = @Schema(implementation = EstimateResponseDto.class)))
-    @APIResponse(responseCode = "404", description = "Work order or estimate not found")
-    @APIResponse(responseCode = "409", description = "Estimate already approved or rejected")
+    @Operation(summary = "Fluxo legado indisponível", description = "Aguarda integração com Billing e Execution.")
+    @APIResponse(responseCode = "503", description = "Fluxo temporariamente indisponível")
     Uni<EstimateResponseDto> rejectEstimate(
             @Parameter(name = "id", description = "Work order identifier", required = true, in = ParameterIn.PATH)
             @PathParam("id") UUID id,
@@ -170,14 +142,8 @@ public interface WorkOrderControllerDocs {
 
     @POST
     @Path("/{id}/services")
-    @Operation(summary = "Add service", description = "Adds a labor service line performed on the work order.")
-    @APIResponse(responseCode = "201", description = "Service added successfully",
-            content = @Content(mediaType = MediaType.APPLICATION_JSON,
-                    schema = @Schema(implementation = WorkOrderServiceResponseDto.class)))
-    @APIResponse(responseCode = "400", description = "Invalid request body")
-    @APIResponse(responseCode = "404", description = "Work order not found")
-    @APIResponse(responseCode = "422",
-            description = "Ordem entregue ou concluída por recusa do orçamento")
+    @Operation(summary = "Fluxo legado indisponível", description = "Aguarda integração com Billing e Execution.")
+    @APIResponse(responseCode = "503", description = "Fluxo temporariamente indisponível")
     Uni<Response> addService(
             @Parameter(name = "id", description = "Work order identifier", required = true, in = ParameterIn.PATH)
             @PathParam("id") UUID id,
@@ -186,15 +152,8 @@ public interface WorkOrderControllerDocs {
 
     @PATCH
     @Path("/{id}/close")
-    @Operation(summary = "Close work order",
-            description = "Finalizes a work order that is IN_PROGRESS and has an approved estimate. Sets "
-                    + "closedAt and finalValue (defaults to estimatedValue when omitted), and moves status to "
-                    + "COMPLETED.")
-    @APIResponse(responseCode = "200", description = "Work order closed successfully",
-            content = @Content(mediaType = MediaType.APPLICATION_JSON,
-                    schema = @Schema(implementation = WorkOrderResponseDto.class)))
-    @APIResponse(responseCode = "404", description = "Work order not found")
-    @APIResponse(responseCode = "422", description = "Work order is not in progress or has no approved estimate")
+    @Operation(summary = "Fluxo legado indisponível", description = "Aguarda integração com Billing e Execution.")
+    @APIResponse(responseCode = "503", description = "Fluxo temporariamente indisponível")
     Uni<WorkOrderResponseDto> close(
             @Parameter(name = "id", description = "Work order identifier", required = true, in = ParameterIn.PATH)
             @PathParam("id") UUID id,

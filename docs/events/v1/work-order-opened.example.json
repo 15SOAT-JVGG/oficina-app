@@ -1,0 +1,23 @@
+{
+  "eventId": "1f1c3028-54c9-4c1a-937a-5f91998a0265",
+  "version": 1,
+  "sagaId": "c3bf539f-118e-474d-9497-b446c687953a",
+  "correlationId": "0123aa40-a5f7-4b55-a95a-02dd7e38f3a0",
+  "causationId": null,
+  "workOrderId": "038ba207-22c3-4df5-8a26-afb8544851e9",
+  "occurredAt": "2026-11-12T12:00:00Z",
+  "type": "work-order.opened",
+  "data": {
+    "services": [
+      {
+        "serviceItemId": "75cd9331-ef14-456f-b69e-edfe34cfb0cb"
+      }
+    ],
+    "parts": [
+      {
+        "partId": "83cb9ff4-f971-4ba5-9fb6-1486531dc9cc",
+        "quantity": 2
+      }
+    ]
+  }
+}

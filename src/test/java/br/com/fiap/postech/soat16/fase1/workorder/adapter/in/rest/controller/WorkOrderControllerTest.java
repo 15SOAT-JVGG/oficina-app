@@ -32,20 +32,15 @@ import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.Wo
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.WorkOrderRequestDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.WorkOrderServiceRequestDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.request.WorkOrderStatusUpdateRequestDto;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.EstimateResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.OpenedWorkOrderResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderMetricsResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.application.WorkOrderService;
-import br.com.fiap.postech.soat16.fase1.workorder.application.result.EstimateResult;
 import br.com.fiap.postech.soat16.fase1.workorder.application.result.OpenWorkOrderResult;
 import br.com.fiap.postech.soat16.fase1.workorder.application.result.WorkOrderMetricsResult;
 import br.com.fiap.postech.soat16.fase1.workorder.application.result.WorkOrderResult;
-import br.com.fiap.postech.soat16.fase1.workorder.application.result.WorkOrderServiceResult;
-import br.com.fiap.postech.soat16.fase1.workorder.domain.exception.EstimateNotApprovedException;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.exception.WorkOrderLockedException;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.exception.WorkOrderNotFoundException;
-import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.EstimateStatus;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderPriority;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderStatus;
 
@@ -141,16 +136,13 @@ class WorkOrderControllerTest {
     class Create {
 
         @Test
-        @DisplayName("should return HTTP 201 with the opened work order and its initial estimate")
+        @DisplayName("should return HTTP 201 before the estimate is created asynchronously")
         void shouldReturn201WhenCreateSucceeds() {
             WorkOrderRequestDto dto = new WorkOrderRequestDto(
                     UUID.randomUUID(), UUID.randomUUID(), "desc", null, null, null, null);
-            EstimateResult estimateResult = new EstimateResult(
-                    UUID.randomUUID(), FIXED_UUID, EstimateStatus.PENDING, BigDecimal.TEN, BigDecimal.ZERO,
-                    BigDecimal.TEN, null, null, List.of());
             var command = WorkOrderRestMapper.toCommand(dto);
             when(service.create(command))
-                    .thenReturn(Uni.createFrom().item(new OpenWorkOrderResult(response, estimateResult)));
+                    .thenReturn(Uni.createFrom().item(new OpenWorkOrderResult(response)));
 
             Response result = controller.create(dto).await().indefinitely();
 
@@ -158,7 +150,7 @@ class WorkOrderControllerTest {
             assertEquals("/v1/work-orders/" + FIXED_UUID, result.getLocation().toString());
             OpenedWorkOrderResponseDto body = (OpenedWorkOrderResponseDto) result.getEntity();
             assertEquals(FIXED_UUID, body.workOrder().workOrderId());
-            assertEquals(EstimateStatus.PENDING, body.estimate().status());
+            assertNull(body.estimate());
             verify(service).create(command);
         }
 
@@ -169,7 +161,7 @@ class WorkOrderControllerTest {
                     UUID.randomUUID(), UUID.randomUUID(), "desc", null, null, null, null);
             var command = WorkOrderRestMapper.toCommand(dto);
             when(service.create(command))
-                    .thenReturn(Uni.createFrom().item(new OpenWorkOrderResult(response, null)));
+                    .thenReturn(Uni.createFrom().item(new OpenWorkOrderResult(response)));
 
             Response result = controller.create(dto).await().indefinitely();
 
@@ -207,120 +199,25 @@ class WorkOrderControllerTest {
         }
     }
 
-    @Nested
-    @DisplayName("POST /v1/work-orders/{id}/estimate — createEstimate")
-    class CreateEstimate {
-
-        @Test
-        @DisplayName("should return HTTP 201 with the created estimate")
-        void shouldReturn201WithCreatedEstimate() {
-            EstimateRequestDto dto = new EstimateRequestDto(
-                    List.of(new EstimateItemRequestDto(UUID.randomUUID(), 1, BigDecimal.TEN)));
-            EstimateResult estimateResult = new EstimateResult(
-                    UUID.randomUUID(), FIXED_UUID, EstimateStatus.PENDING, BigDecimal.TEN, BigDecimal.ZERO,
-                    BigDecimal.TEN, null, null, List.of());
-            var command = WorkOrderRestMapper.toCommand(dto);
-
-            when(service.createEstimate(FIXED_UUID, command)).thenReturn(Uni.createFrom().item(estimateResult));
-
-            Response result = controller.createEstimate(FIXED_UUID, dto).await().indefinitely();
-
-            assertEquals(201, result.getStatus());
-            assertEquals(WorkOrderRestMapper.toResponse(estimateResult), result.getEntity());
-            verify(service).createEstimate(FIXED_UUID, command);
-        }
+    @Test
+    @DisplayName("fluxos legados respondem 503 sem invocar o serviço")
+    void legacyFlowsAreUnavailable() {
+        UUID estimate = UUID.randomUUID();
+        var create = new EstimateRequestDto(List.of(new EstimateItemRequestDto(UUID.randomUUID(), 1, BigDecimal.TEN)));
+        var labor = new WorkOrderServiceRequestDto("Serviço", BigDecimal.TEN, null);
+        var close = new WorkOrderCloseRequestDto(BigDecimal.TEN);
+        var status = new WorkOrderStatusUpdateRequestDto(WorkOrderStatus.WAITING_APPROVAL);
+        assertUnavailable(() -> controller.createEstimate(FIXED_UUID, create).await().indefinitely());
+        assertUnavailable(() -> controller.approveEstimate(FIXED_UUID, estimate).await().indefinitely());
+        assertUnavailable(() -> controller.rejectEstimate(FIXED_UUID, estimate).await().indefinitely());
+        assertUnavailable(() -> controller.addService(FIXED_UUID, labor).await().indefinitely());
+        assertUnavailable(() -> controller.close(FIXED_UUID, close).await().indefinitely());
+        assertUnavailable(() -> controller.updateStatus(FIXED_UUID, status).await().indefinitely());
+        org.mockito.Mockito.verifyNoInteractions(service);
     }
 
-    @Nested
-    @DisplayName("PATCH /v1/work-orders/{id}/estimate/{estimateId}/approve — approveEstimate")
-    class ApproveEstimate {
-
-        @Test
-        @DisplayName("should return the approved estimate")
-        void shouldReturnApprovedEstimate() {
-            UUID estimateId = UUID.randomUUID();
-            EstimateResult estimateResult = new EstimateResult(
-                    estimateId, FIXED_UUID, EstimateStatus.APPROVED, BigDecimal.TEN, BigDecimal.ZERO,
-                    BigDecimal.TEN, null, null, List.of());
-
-            when(service.approveEstimate(FIXED_UUID, estimateId)).thenReturn(Uni.createFrom().item(estimateResult));
-
-            EstimateResponseDto result = controller.approveEstimate(FIXED_UUID, estimateId).await().indefinitely();
-
-            assertEquals(EstimateStatus.APPROVED, result.status());
-            verify(service).approveEstimate(FIXED_UUID, estimateId);
-        }
-
-        @Test
-        @DisplayName("should propagate EstimateNotApprovedException-like business failures")
-        void shouldPropagateBusinessException() {
-            UUID estimateId = UUID.randomUUID();
-            when(service.approveEstimate(FIXED_UUID, estimateId))
-                    .thenReturn(Uni.createFrom().failure(new EstimateNotApprovedException()));
-
-            assertThrows(EstimateNotApprovedException.class,
-                    () -> controller.approveEstimate(FIXED_UUID, estimateId).await().indefinitely());
-        }
-    }
-
-    @Nested
-    @DisplayName("PATCH /v1/work-orders/{id}/estimate/{estimateId}/reject — rejectEstimate")
-    class RejectEstimate {
-
-        @Test
-        @DisplayName("should return the rejected estimate")
-        void shouldReturnRejectedEstimate() {
-            UUID estimateId = UUID.randomUUID();
-            EstimateResult estimateResult = new EstimateResult(
-                    estimateId, FIXED_UUID, EstimateStatus.REJECTED, BigDecimal.TEN, BigDecimal.ZERO,
-                    BigDecimal.TEN, null, null, List.of());
-
-            when(service.rejectEstimate(FIXED_UUID, estimateId)).thenReturn(Uni.createFrom().item(estimateResult));
-
-            EstimateResponseDto result = controller.rejectEstimate(FIXED_UUID, estimateId).await().indefinitely();
-
-            assertEquals(EstimateStatus.REJECTED, result.status());
-            verify(service).rejectEstimate(FIXED_UUID, estimateId);
-        }
-    }
-
-    @Nested
-    @DisplayName("POST /v1/work-orders/{id}/services — addService")
-    class AddService {
-
-        @Test
-        @DisplayName("should return HTTP 201 with the created service line")
-        void shouldReturn201WithCreatedService() {
-            WorkOrderServiceRequestDto dto = new WorkOrderServiceRequestDto("Troca de oleo", BigDecimal.TEN, null);
-            WorkOrderServiceResult serviceResult = new WorkOrderServiceResult(
-                    UUID.randomUUID(), FIXED_UUID, "Troca de oleo", BigDecimal.TEN, null, null);
-            var command = WorkOrderRestMapper.toCommand(dto);
-
-            when(service.addService(FIXED_UUID, command)).thenReturn(Uni.createFrom().item(serviceResult));
-
-            Response result = controller.addService(FIXED_UUID, dto).await().indefinitely();
-
-            assertEquals(201, result.getStatus());
-            assertEquals(WorkOrderRestMapper.toResponse(serviceResult), result.getEntity());
-            verify(service).addService(FIXED_UUID, command);
-        }
-    }
-
-    @Nested
-    @DisplayName("PATCH /v1/work-orders/{id}/close — close")
-    class Close {
-
-        @Test
-        @DisplayName("should return the closed work order")
-        void shouldReturnClosedWorkOrder() {
-            WorkOrderCloseRequestDto dto = new WorkOrderCloseRequestDto(BigDecimal.valueOf(300));
-            var command = WorkOrderRestMapper.toCommand(dto);
-            when(service.close(FIXED_UUID, command)).thenReturn(Uni.createFrom().item(response));
-
-            WorkOrderResponseDto result = controller.close(FIXED_UUID, dto).await().indefinitely();
-
-            assertNotNull(result);
-            verify(service).close(FIXED_UUID, command);
-        }
+    private void assertUnavailable(org.junit.jupiter.api.function.Executable action) {
+        var error = assertThrows(jakarta.ws.rs.WebApplicationException.class, action);
+        assertEquals(503, error.getResponse().getStatus());
     }
 }

@@ -108,12 +108,12 @@ class WorkOrderOpenApiContractIT {
         }
 
         @Test
-        @DisplayName("devem documentar o 422 do estoque insuficiente ao aguardar a decisão do cliente")
+        @DisplayName("devem documentar a indisponibilidade da criação de orçamento")
         void shouldDocumentTheInsufficientStockResponse() {
             assertTrue(documentedStatuses(new Operation("patch", WORK_ORDERS_PATH + "/{id}/status"))
                     .contains("422"));
             assertTrue(documentedStatuses(new Operation("post", WORK_ORDERS_PATH + "/{id}/estimate"))
-                    .contains("422"));
+                    .contains("503"));
         }
 
         // A recusa devolve ao estoque as peças reservadas na entrada em WAITING_APPROVAL; o contrato
@@ -146,7 +146,7 @@ class WorkOrderOpenApiContractIT {
             List<String> statuses =
                     documentedStatuses(new Operation("post", PUBLIC_PATH + "/estimate-decisions/{token}"));
 
-            assertTrue(statuses.containsAll(List.of("200", "400", "404", "409", "410", "422")));
+            assertTrue(statuses.contains("503"));
         }
 
         @Test

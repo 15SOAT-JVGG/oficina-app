@@ -3,7 +3,6 @@ package br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.controller;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -25,13 +24,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.pagination.PageableRequestDto;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.pagination.PageableResponseDto;
 import br.com.fiap.postech.soat16.fase1.shared.application.result.PagedResult;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.EstimateResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.application.WorkOrderService;
-import br.com.fiap.postech.soat16.fase1.workorder.application.result.EstimateResult;
 import br.com.fiap.postech.soat16.fase1.workorder.application.result.WorkOrderResult;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.exception.WorkOrderNotFoundException;
-import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.EstimateStatus;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderStatus;
 
 import io.smallrye.mutiny.Uni;
@@ -59,11 +55,6 @@ class CustomerWorkOrderControllerTest {
         controller = new CustomerWorkOrderController(service, token);
         workOrder = new WorkOrderResult(WORK_ORDER_ID, CUSTOMER_ID, UUID.randomUUID(), "Troca de óleo", null,
                 WorkOrderStatus.WAITING_APPROVAL, null, null, null, BigDecimal.TEN, null, null);
-    }
-
-    private EstimateResult estimate(EstimateStatus status) {
-        return new EstimateResult(ESTIMATE_ID, WORK_ORDER_ID, status, BigDecimal.TEN, BigDecimal.ZERO,
-                BigDecimal.TEN, null, null, List.of());
     }
 
     @Nested
@@ -136,29 +127,15 @@ class CustomerWorkOrderControllerTest {
         }
 
         @Test
-        @DisplayName("deve aprovar o orçamento em nome do cliente do token")
-        void shouldApproveEstimate() {
-            when(service.approveCustomerEstimate(CUSTOMER_ID, WORK_ORDER_ID, ESTIMATE_ID))
-                    .thenReturn(Uni.createFrom().item(estimate(EstimateStatus.APPROVED)));
-
-            EstimateResponseDto result = controller.approveMyEstimate(WORK_ORDER_ID, ESTIMATE_ID)
-                    .await().indefinitely();
-
-            assertEquals(EstimateStatus.APPROVED, result.status());
-            verify(service).approveCustomerEstimate(CUSTOMER_ID, WORK_ORDER_ID, ESTIMATE_ID);
-        }
-
-        @Test
-        @DisplayName("deve recusar o orçamento em nome do cliente do token")
-        void shouldRejectEstimate() {
-            when(service.rejectCustomerEstimate(CUSTOMER_ID, WORK_ORDER_ID, ESTIMATE_ID))
-                    .thenReturn(Uni.createFrom().item(estimate(EstimateStatus.REJECTED)));
-
-            EstimateResponseDto result = controller.rejectMyEstimate(WORK_ORDER_ID, ESTIMATE_ID)
-                    .await().indefinitely();
-
-            assertEquals(EstimateStatus.REJECTED, result.status());
-            verify(service).rejectCustomerEstimate(CUSTOMER_ID, WORK_ORDER_ID, ESTIMATE_ID);
+        @DisplayName("decisões do cliente respondem 503 sem acessar orçamento local")
+        void decisionsAreUnavailable() {
+            var approve = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                    () -> controller.approveMyEstimate(WORK_ORDER_ID, ESTIMATE_ID).await().indefinitely());
+            var reject = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                    () -> controller.rejectMyEstimate(WORK_ORDER_ID, ESTIMATE_ID).await().indefinitely());
+            assertEquals(503, approve.getResponse().getStatus());
+            assertEquals(503, reject.getResponse().getStatus());
+            org.mockito.Mockito.verifyNoInteractions(service);
         }
     }
 }

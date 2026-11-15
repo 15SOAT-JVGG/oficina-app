@@ -19,6 +19,7 @@ import jakarta.ws.rs.core.Response;
 
 import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 
+import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.exception.LegacyFlowUnavailable;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.pagination.PageableRequestDto;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.pagination.PageableResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.WorkOrderRestMapper;
@@ -32,6 +33,7 @@ import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.W
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.openapi.WorkOrderControllerDocs;
 import br.com.fiap.postech.soat16.fase1.workorder.application.WorkOrderService;
+import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderStatus;
 
 import io.smallrye.mutiny.Uni;
 import lombok.RequiredArgsConstructor;
@@ -87,6 +89,9 @@ public class WorkOrderController implements WorkOrderControllerDocs {
     @Override
     public Uni<WorkOrderResponseDto> updateStatus(@PathParam("id") UUID id,
                                                    @RequestBody @Valid WorkOrderStatusUpdateRequestDto dto) {
+        if (dto.status() != WorkOrderStatus.RECEIVED && dto.status() != WorkOrderStatus.DIAGNOSIS) {
+            return LegacyFlowUnavailable.response();
+        }
         return service.updateStatus(id, WorkOrderRestMapper.toCommand(dto))
                 .map(WorkOrderRestMapper::toResponse);
     }
@@ -96,9 +101,7 @@ public class WorkOrderController implements WorkOrderControllerDocs {
     @Override
     public Uni<Response> createEstimate(@PathParam("id") UUID id,
                                          @RequestBody @Valid EstimateRequestDto dto) {
-        return service.createEstimate(id, WorkOrderRestMapper.toCommand(dto))
-                .map(WorkOrderRestMapper::toResponse)
-                .map(created -> Response.status(Response.Status.CREATED).entity(created).build());
+        return LegacyFlowUnavailable.response();
     }
 
     @PATCH
@@ -106,7 +109,7 @@ public class WorkOrderController implements WorkOrderControllerDocs {
     @Override
     public Uni<EstimateResponseDto> approveEstimate(@PathParam("id") UUID id,
                                                      @PathParam("estimateId") UUID estimateId) {
-        return service.approveEstimate(id, estimateId).map(WorkOrderRestMapper::toResponse);
+        return LegacyFlowUnavailable.response();
     }
 
     @PATCH
@@ -114,7 +117,7 @@ public class WorkOrderController implements WorkOrderControllerDocs {
     @Override
     public Uni<EstimateResponseDto> rejectEstimate(@PathParam("id") UUID id,
                                                     @PathParam("estimateId") UUID estimateId) {
-        return service.rejectEstimate(id, estimateId).map(WorkOrderRestMapper::toResponse);
+        return LegacyFlowUnavailable.response();
     }
 
     @POST
@@ -122,9 +125,7 @@ public class WorkOrderController implements WorkOrderControllerDocs {
     @Override
     public Uni<Response> addService(@PathParam("id") UUID id,
                                      @RequestBody @Valid WorkOrderServiceRequestDto dto) {
-        return service.addService(id, WorkOrderRestMapper.toCommand(dto))
-                .map(WorkOrderRestMapper::toResponse)
-                .map(created -> Response.status(Response.Status.CREATED).entity(created).build());
+        return LegacyFlowUnavailable.response();
     }
 
     @PATCH
@@ -132,7 +133,6 @@ public class WorkOrderController implements WorkOrderControllerDocs {
     @Override
     public Uni<WorkOrderResponseDto> close(@PathParam("id") UUID id,
                                             @RequestBody @Valid WorkOrderCloseRequestDto dto) {
-        return service.close(id, WorkOrderRestMapper.toCommand(dto))
-                .map(WorkOrderRestMapper::toResponse);
+        return LegacyFlowUnavailable.response();
     }
 }

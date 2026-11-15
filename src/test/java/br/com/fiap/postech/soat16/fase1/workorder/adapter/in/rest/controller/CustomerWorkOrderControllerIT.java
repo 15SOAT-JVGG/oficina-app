@@ -2,9 +2,7 @@ package br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.controller;
 
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Set;
 import java.util.UUID;
@@ -20,8 +18,6 @@ import org.junit.jupiter.api.Test;
 import br.com.fiap.postech.soat16.fase1.customer.adapter.out.persistence.CustomerRepository;
 import br.com.fiap.postech.soat16.fase1.customer.domain.model.Customer;
 import br.com.fiap.postech.soat16.fase1.customer.domain.model.enums.DocumentType;
-import br.com.fiap.postech.soat16.fase1.part.adapter.out.persistence.PartRepository;
-import br.com.fiap.postech.soat16.fase1.part.domain.model.Part;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.dto.ApiErrorResponseDto;
 import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.pagination.PageableResponseDto;
 import br.com.fiap.postech.soat16.fase1.shared.domain.exception.ErrorType;
@@ -30,10 +26,8 @@ import br.com.fiap.postech.soat16.fase1.shared.test.infrastructure.PostgresTestR
 import br.com.fiap.postech.soat16.fase1.vehicle.adapter.out.persistence.VehicleRepository;
 import br.com.fiap.postech.soat16.fase1.vehicle.domain.model.Vehicle;
 import br.com.fiap.postech.soat16.fase1.vehicle.domain.model.enums.VehicleType;
-import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.EstimateResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.OpenedWorkOrderResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderResponseDto;
-import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.EstimateStatus;
 import br.com.fiap.postech.soat16.fase1.workorder.domain.model.enums.WorkOrderStatus;
 
 import io.quarkus.hibernate.reactive.panache.Panache;
@@ -65,9 +59,6 @@ class CustomerWorkOrderControllerIT {
 
     @Inject
     VehicleRepository vehicleRepository;
-
-    @Inject
-    PartRepository partRepository;
 
     private static String staffToken(String role) {
         return Jwt.issuer("oficina-api")
@@ -124,10 +115,6 @@ class CustomerWorkOrderControllerIT {
         return persistInTransaction(() -> vehicleRepository.save(vehicle)).getId();
     }
 
-    private UUID seedPart() {
-        Part part = new Part("Pastilha de freio", "Jogo dianteiro", new BigDecimal("80.00"), 100, "UN");
-        return persistInTransaction(() -> partRepository.save(part)).getId();
-    }
 
     private UUID openWorkOrder(UUID customerId) {
         String body = """
@@ -148,25 +135,6 @@ class CustomerWorkOrderControllerIT {
      * Leva a ordem ao ponto em que o cliente decide: diagnóstico e orçamento enviado, com a peça
      * reservada.
      */
-    private UUID awaitCustomerDecision(UUID workOrderId) {
-        asAdmin()
-                .contentType("application/json")
-                .body("{\"status\":\"DIAGNOSIS\"}")
-        .when()
-                .patch(WORK_ORDERS_PATH + "/" + workOrderId + "/status")
-        .then()
-                .statusCode(200);
-
-        return asAdmin()
-                .contentType("application/json")
-                .body("{\"items\":[{\"partId\":\"%s\",\"quantity\":1}]}".formatted(seedPart()))
-        .when()
-                .post(WORK_ORDERS_PATH + "/" + workOrderId + "/estimate")
-        .then()
-                .statusCode(201)
-                .extract().as(EstimateResponseDto.class)
-                .estimateId();
-    }
 
     @Nested
     @DisplayName("Autenticação e autorização")
@@ -282,76 +250,10 @@ class CustomerWorkOrderControllerIT {
     @DisplayName("Decisão do orçamento pelo cliente autenticado")
     class EstimateDecision {
 
-        @Test
-        @DisplayName("deve aprovar o orçamento, iniciar a execução e bloquear nova decisão")
-        void shouldApproveEstimateAndBlockSecondDecision() {
-            UUID customerId = seedCustomer();
-            UUID workOrderId = openWorkOrder(customerId);
-            UUID estimateId = awaitCustomerDecision(workOrderId);
-            String approvePath = MY_WORK_ORDERS_PATH + "/" + workOrderId + "/estimate/" + estimateId + "/approve";
 
-            EstimateResponseDto approved = asCustomer(customerId)
-            .when()
-                .patch(approvePath)
-            .then()
-                .statusCode(200)
-                .extract().as(EstimateResponseDto.class);
 
-            assertEquals(EstimateStatus.APPROVED, approved.status());
-            assertNotNull(approved.approvedAt());
-            assertEquals(WorkOrderStatus.IN_PROGRESS, asCustomer(customerId)
-                    .get(MY_WORK_ORDERS_PATH + "/" + workOrderId)
-                    .as(WorkOrderResponseDto.class).status());
 
-            ApiErrorResponseDto error = asCustomer(customerId)
-            .when()
-                .patch(approvePath)
-            .then()
-                .statusCode(409)
-                .extract().as(ApiErrorResponseDto.class);
 
-            assertEquals("ESTIMATE_ALREADY_DECIDED", error.code());
-        }
 
-        @Test
-        @DisplayName("deve recusar o orçamento e concluir a ordem como cancelada")
-        void shouldRejectEstimateAndCancelWorkOrder() {
-            UUID customerId = seedCustomer();
-            UUID workOrderId = openWorkOrder(customerId);
-            UUID estimateId = awaitCustomerDecision(workOrderId);
-
-            EstimateResponseDto rejected = asCustomer(customerId)
-            .when()
-                .patch(MY_WORK_ORDERS_PATH + "/" + workOrderId + "/estimate/" + estimateId + "/reject")
-            .then()
-                .statusCode(200)
-                .extract().as(EstimateResponseDto.class);
-
-            assertEquals(EstimateStatus.REJECTED, rejected.status());
-            WorkOrderResponseDto workOrder = asCustomer(customerId)
-                    .get(MY_WORK_ORDERS_PATH + "/" + workOrderId)
-                    .as(WorkOrderResponseDto.class);
-            assertEquals(WorkOrderStatus.COMPLETED, workOrder.status());
-            assertNotNull(workOrder.cancelledAt());
-        }
-
-        @Test
-        @DisplayName("deve impedir que um cliente decida o orçamento de outro")
-        void shouldNotLetCustomerDecideEstimateOfAnother() {
-            UUID workOrderId = openWorkOrder(seedCustomer());
-            UUID estimateId = awaitCustomerDecision(workOrderId);
-
-            ApiErrorResponseDto error = asCustomer(seedCustomer())
-            .when()
-                .patch(MY_WORK_ORDERS_PATH + "/" + workOrderId + "/estimate/" + estimateId + "/approve")
-            .then()
-                .statusCode(404)
-                .extract().as(ApiErrorResponseDto.class);
-
-            assertEquals("WORK_ORDER_NOT_FOUND", error.code());
-            assertEquals(WorkOrderStatus.WAITING_APPROVAL, asAdmin()
-                    .get(WORK_ORDERS_PATH + "/" + workOrderId)
-                    .as(WorkOrderResponseDto.class).status());
-        }
     }
 }

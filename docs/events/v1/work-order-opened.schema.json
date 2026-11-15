@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "work-order.opened v1",
+  "type": "object",
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "type": {
+      "const": "work-order.opened"
+    },
+    "version": {
+      "const": 1
+    },
+    "sagaId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "causationId": {
+      "type": "null"
+    },
+    "workOrderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "serviceItemId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "serviceItemId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "partId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "partId",
+              "quantity"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "services",
+        "parts"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "eventId",
+    "type",
+    "version",
+    "sagaId",
+    "correlationId",
+    "causationId",
+    "workOrderId",
+    "occurredAt",
+    "data"
+  ],
+  "additionalProperties": false
+}

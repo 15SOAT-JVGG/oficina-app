@@ -46,10 +46,10 @@ class WorkerArchitectureTest {
     }
 
     @Test
-    @DisplayName("o catálogo de Work Order depende da porta de persistência")
+    @DisplayName("a consulta de participantes da OS depende da porta de persistência")
     void workOrderCatalogDependsOnWorkerPort() throws IOException {
         Path adapter = SOURCE_ROOT.resolve(
-                "workorder/adapter/out/catalog/LegacyWorkshopCatalogAdapter.java");
+                "workorder/adapter/out/participant/WorkOrderParticipantLookupAdapter.java");
         String source = Files.readString(adapter);
 
         assertTrue(source.contains(

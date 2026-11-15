@@ -3,9 +3,10 @@
 ## O projeto
 
 Back-end do **Sistema Integrado de Atendimento e Execução de Serviços** de uma oficina mecânica
-(FIAP 16SOAT — Tech Challenge). Expõe uma API REST que cobre ordens de serviço, orçamentos,
-clientes, veículos, catálogo de serviços e peças com controle de estoque, além de um canal público
-para o cliente acompanhar a OS e aprovar o orçamento.
+(FIAP 16SOAT — Tech Challenge). Expõe uma API REST para ordens de serviço, clientes, veículos e
+equipe, além de um canal público de acompanhamento. Catálogo e orçamento pertencem ao Billing;
+estoque pertence ao Execution. A abertura da OS envia eventos ao Billing e mostra a projeção
+assíncrona do orçamento.
 
 ### Stack
 
@@ -42,7 +43,7 @@ SpotBugs, Spotless e o gate de cobertura do JaCoCo.
 ## Arquitetura Hexagonal
 
 O código é organizado por **bounded context** e, dentro de cada um, por camada hexagonal.
-Contextos atuais: `auth`, `customer`, `part`, `servicecatalog`, `vehicle`, `worker`, `workorder`,
+Contextos atuais: `auth`, `customer`, `vehicle`, `worker`, `workorder`,
 mais o `shared` com utilitários transversais.
 
 ```
@@ -82,8 +83,8 @@ domínio e persiste o resultado. Retorne sempre `Uni<T>` nas camadas reativas e 
 ## DDD
 
 - Coloque a regra de negócio no agregado, não no service. `WorkOrder` decide as transições de
-  status válidas (`transitionTo`, `close`, `ensureMutable`); `Estimate` decide se pode ser aprovado
-  (`assertPending`, `approve`); `Part` controla o próprio saldo (`decreaseStock`, `isLowStock`).
+  status válidas (`transitionTo`, `close`, `ensureMutable`). Orçamentos e saldo de estoque são
+  responsabilidade dos serviços Billing e Execution.
 - Crie agregados por factory method estático nomeado pela intenção (`Customer.create(...)`,
   `WorkOrder.open(...)`) e mude estado por métodos de comportamento (`approve()`, `close()`).
 - Use value objects para conceitos com invariante própria e valide-os na criação. `Document.of(...)`
@@ -92,7 +93,7 @@ domínio e persiste o resultado. Retorne sempre `Uni<T>` nas camadas reativas e 
   `ResourceNotFoundException`, com um `ErrorCode` do contexto — assim o `AppExceptionMapper`
   traduz para a resposta HTTP correta.
 - Baseie `equals`/`hashCode` de entidade na identidade persistida, como em `Customer`.
-- Use a linguagem do negócio nos nomes: `WorkOrder`, `Estimate`, `ServiceItem`, `Worker`.
+- Use a linguagem do negócio nos nomes: `WorkOrder`, `EstimateProjection`, `Customer`, `Worker`.
   Em português apenas o texto voltado a pessoas (`@DisplayName`, mensagens, documentação).
 
 ---
@@ -149,13 +150,12 @@ service, domínio, persistência e migrations juntos. `WorkOrderControllerIT` é
 
 Fluxos que exigem teste de integração:
 
-1. **Ciclo de vida da OS:** abertura, inclusão de serviços e peças, e as transições
-   `RECEIVED → DIAGNOSIS → WAITING_APPROVAL → IN_PROGRESS → COMPLETED → DELIVERED`, incluindo
-   conclusão com `cancelledAt` por recusa do orçamento e rejeição de transições inválidas.
-2. **Orçamento:** geração automática (peças + mão de obra), aprovação e recusa pelos links assinados
-   do canal do cliente, e o bloqueio de nova decisão sobre orçamento já decidido.
-3. **Estoque de peças:** reserva ao levar a OS a `WAITING_APPROVAL`, devolução na recusa do
-   orçamento e recusa da operação quando o saldo é insuficiente.
+1. **Abertura assíncrona:** OS, projeção inicial e evento outbox são gravados na mesma transação;
+   o resultado do Billing entra pela inbox e só atualiza uma projeção ainda aguardando.
+2. **Mensageria:** publicação SNS FIFO com retentativa e ordem por OS; consumo SQS FIFO confirma
+   a mensagem somente após commit. Integração local usa Postgres e LocalStack.
+3. **Transição de legado:** fluxos locais de orçamento e estoque respondem `503` até os respectivos
+   serviços oferecerem as integrações. Teste as respostas e a autorização desses endpoints.
 4. **Autenticação e autorização:** login, emissão de JWT RS256 e RBAC nas rotas administrativas
    (`AuthControllerIT`, `SecurityIT`).
 5. **Persistência de cada contexto:** os `*RepositoryIT` validam mapeamento JPA, constraints de

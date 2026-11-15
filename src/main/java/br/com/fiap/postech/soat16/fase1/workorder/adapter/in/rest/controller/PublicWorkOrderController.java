@@ -10,6 +10,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
+import br.com.fiap.postech.soat16.fase1.shared.adapter.in.rest.exception.LegacyFlowUnavailable;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.WorkOrderRestMapper;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.EstimateResponseDto;
 import br.com.fiap.postech.soat16.fase1.workorder.adapter.in.rest.dto.response.WorkOrderTrackingResponseDto;
@@ -52,6 +53,6 @@ public class PublicWorkOrderController implements PublicWorkOrderControllerDocs 
     @Consumes(MediaType.WILDCARD)
     @Override
     public Uni<EstimateResponseDto> decideEstimate(@PathParam("token") String token) {
-        return service.decideEstimate(token).map(WorkOrderRestMapper::toResponse);
+        return LegacyFlowUnavailable.response();
     }
 }

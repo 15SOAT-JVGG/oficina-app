@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "estimate.created v1",
+  "type": "object",
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "type": {
+      "const": "estimate.created"
+    },
+    "version": {
+      "const": 1
+    },
+    "sagaId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "causationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workOrderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "estimateId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "catalogItemId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "unitPrice": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "catalogItemId",
+              "name",
+              "quantity",
+              "unitPrice"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "catalogItemId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "unitPrice": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "catalogItemId",
+              "name",
+              "quantity",
+              "unitPrice"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "totalAmount": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "estimateId",
+        "services",
+        "parts",
+        "totalAmount"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "eventId",
+    "type",
+    "version",
+    "sagaId",
+    "correlationId",
+    "causationId",
+    "workOrderId",
+    "occurredAt",
+    "data"
+  ],
+  "additionalProperties": false
+}

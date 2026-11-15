@@ -23,9 +23,8 @@ import io.smallrye.mutiny.Uni;
 
 /**
  * Canal voltado ao cliente final, separado das APIs administrativas. Nada aqui é acessível por id:
- * tanto o acompanhamento quanto a decisão sobre o orçamento exigem o token assinado que a oficina
- * enviou por e-mail — o de acompanhamento vale trinta dias e quantas consultas o cliente quiser; o
- * de decisão, por alterar OS e estoque, vale uma única vez.
+ * o acompanhamento exige o token assinado que a oficina enviou por e-mail e vale trinta dias.
+ * A decisão de orçamento está indisponível durante a integração.
  */
 @Path("/v1/public/work-orders")
 @Produces(MediaType.APPLICATION_JSON)
@@ -53,18 +52,8 @@ public interface PublicWorkOrderControllerDocs {
     @POST
     @Path("/estimate-decisions/{token}")
     @Consumes(MediaType.WILDCARD)
-    @Operation(summary = "Registrar a decisão do cliente sobre o orçamento",
-            description = "Consome o link assinado enviado por e-mail. A aprovação mantém a reserva de estoque e "
-                    + "leva a ordem a IN_PROGRESS; a recusa devolve as peças ao estoque, conclui a ordem e "
-                    + "preenche cancelledAt. Cada link vale uma única vez e expira em sete dias.")
-    @APIResponse(responseCode = "200", description = "Decisão registrada com sucesso",
-            content = @Content(mediaType = MediaType.APPLICATION_JSON,
-                    schema = @Schema(implementation = EstimateResponseDto.class)))
-    @APIResponse(responseCode = "400", description = "Link de decisão inválido ou adulterado")
-    @APIResponse(responseCode = "404", description = "Ordem de serviço ou orçamento não encontrado")
-    @APIResponse(responseCode = "409", description = "Orçamento já aprovado ou recusado")
-    @APIResponse(responseCode = "410", description = "Link de decisão expirado ou já utilizado")
-    @APIResponse(responseCode = "422", description = "Ordem de serviço bloqueada para novas alterações")
+    @Operation(summary = "Decisão indisponível", description = "Aguarda integração com Billing.")
+    @APIResponse(responseCode = "503", description = "Fluxo temporariamente indisponível")
     Uni<EstimateResponseDto> decideEstimate(
             @Parameter(name = "token", description = "Signed single-use estimate decision token",
                     required = true, in = ParameterIn.PATH)
